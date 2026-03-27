@@ -4,16 +4,18 @@
 import uuid
 import time
 import asyncio
-from typing import Optional, Dict, Any, List, AsyncGenerator
+from typing import Optional, Dict, Any, List
 
-from copilotkit import CopilotKitSDK, CopilotKitContext
+from copilotkit import Agent
+from copilotkit.types import Message
+from copilotkit.action import ActionDict
 from app.sdk.client import create_claude_client
 from app.models import ProcessMessage, ProcessMessageType
 from app.config import get_settings
 from app.api.process_stream import broadcast_to_subscribers
 
 
-class ClaudeCodeAgent:
+class ClaudeCodeAgent(Agent):
     """CopilotKit Agent 桥接 Claude SDK"""
 
     def __init__(
@@ -22,51 +24,52 @@ class ClaudeCodeAgent:
         description: str = "Claude Code 助手 - 执行代码任务",
         working_dir: Optional[str] = None,
     ):
-        self.name = name
-        self.description = description
+        super().__init__(name=name, description=description)
         self.working_dir = working_dir or get_settings().working_directory
         self._system_prompt_loaded = False
         self._permission_futures: Dict[str, asyncio.Future] = {}
 
-    async def execute(
+    def execute(
         self,
-        context: CopilotKitContext,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """执行 Agent - 由 CopilotKit 调用"""
-        messages = context.messages
-        thread_id = context.thread_id
+        *,
+        state: dict,
+        config: Optional[dict] = None,
+        messages: List[Message],
+        thread_id: str,
+        actions: Optional[List[ActionDict]] = None,
+        node_name: Optional[str] = None,
+        meta_events: Optional[List] = None,
+        **kwargs,
+    ):
+        """执行 Agent - 由 CopilotKit 调用
 
-        user_message = messages[-1]["content"] if messages else ""
+        This method yields events in the format expected by CopilotKit.
+        """
+        user_message = messages[-1].get("content", "") if messages else ""
         settings = get_settings()
-
-        # 创建客户端
-        client = create_claude_client(
-            working_dir=self.working_dir,
-            can_use_tool=self._handle_permission,
-        )
 
         # 首次对话时，加载系统提示词
         if not self._system_prompt_loaded:
             system_prompt = settings.get_system_prompt()
             if system_prompt:
                 # 发送系统提示词作为思维过程
-                await broadcast_to_subscribers(ProcessMessage(
-                    id=str(uuid.uuid4()),
-                    type=ProcessMessageType.TEXT,
-                    content=f"[系统提示词已加载]\n{system_prompt[:200]}...",
-                    timestamp=int(time.time() * 1000),
-                ))
+                asyncio.create_task(self._broadcast_system_prompt(system_prompt))
             self._system_prompt_loaded = True
 
         # 发送用户消息到思维过程
-        await broadcast_to_subscribers(ProcessMessage(
-            id=str(uuid.uuid4()),
-            type=ProcessMessageType.TEXT,
-            content=f"用户: {user_message}",
-            timestamp=int(time.time() * 1000),
-        ))
+        asyncio.create_task(self._broadcast_user_message(user_message))
 
-        # 执行 Claude Code
+        # 执行 Claude Code 并 yield 事件
+        return self._execute_async(user_message, thread_id)
+
+    async def _execute_async(self, user_message: str, thread_id: str):
+        """异步执行并 yield 事件"""
+        # 创建客户端
+        client = create_claude_client(
+            working_dir=self.working_dir,
+            can_use_tool=self._handle_permission,
+        )
+
         try:
             async for msg in client.query(user_message):
                 # 广播思维过程
@@ -76,13 +79,15 @@ class ClaudeCodeAgent:
 
                 # 如果是最终结果，返回给 CopilotKit
                 if hasattr(msg, 'result') and msg.result:
-                    yield {
-                        "content": msg.result,
-                        "metadata": {
+                    yield self._make_event(
+                        type="result",
+                        content=msg.result,
+                        metadata={
                             "cost": getattr(msg, 'total_cost_usd', None),
                             "duration_ms": getattr(msg, 'duration_ms', None),
                         }
-                    }
+                    )
+
         except Exception as e:
             await broadcast_to_subscribers(ProcessMessage(
                 id=str(uuid.uuid4()),
@@ -90,7 +95,34 @@ class ClaudeCodeAgent:
                 content=f"错误: {str(e)}",
                 timestamp=int(time.time() * 1000),
             ))
-            yield {"content": f"执行出错: {str(e)}"}
+            yield self._make_event(
+                type="error",
+                content=f"执行出错: {str(e)}"
+            )
+
+    def _make_event(self, type: str, content: str, **kwargs) -> str:
+        """创建 CopilotKit 事件格式"""
+        import json
+        event = {"type": type, "content": content, **kwargs}
+        return json.dumps(event) + "\n"
+
+    async def _broadcast_system_prompt(self, prompt: str):
+        """广播系统提示词"""
+        await broadcast_to_subscribers(ProcessMessage(
+            id=str(uuid.uuid4()),
+            type=ProcessMessageType.TEXT,
+            content=f"[系统提示词已加载]\n{prompt[:200]}...",
+            timestamp=int(time.time() * 1000),
+        ))
+
+    async def _broadcast_user_message(self, message: str):
+        """广播用户消息"""
+        await broadcast_to_subscribers(ProcessMessage(
+            id=str(uuid.uuid4()),
+            type=ProcessMessageType.TEXT,
+            content=f"用户: {message}",
+            timestamp=int(time.time() * 1000),
+        ))
 
     async def _handle_permission(
         self,
@@ -119,12 +151,10 @@ class ClaudeCodeAgent:
             return {"allowed": True, "reason": "低风险操作自动批准"}
 
         # 中高风险需要用户确认
-        # 创建 Future 等待前端响应
         future = asyncio.Future()
         self._permission_futures[request_id] = future
 
         try:
-            # 等待前端响应 (超时 60 秒)
             result = await asyncio.wait_for(future, timeout=60.0)
             return result
         except asyncio.TimeoutError:
@@ -140,6 +170,15 @@ class ClaudeCodeAgent:
                 "allowed": approved,
                 "reason": "用户确认" if approved else "用户拒绝"
             })
+
+    async def get_state(self, *, thread_id: str):
+        """获取 Agent 状态"""
+        return {
+            "threadId": thread_id,
+            "threadExists": False,
+            "state": {},
+            "messages": []
+        }
 
     def _get_risk_level(self, tool_name: str) -> str:
         """根据工具名判断风险等级"""
@@ -158,7 +197,6 @@ class ClaudeCodeAgent:
         msg_id = str(uuid.uuid4())
         timestamp = int(time.time() * 1000)
 
-        # 检查消息类型并转换
         msg_type = type(msg).__name__
 
         if msg_type == "AssistantMessage":

@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     working_directory: str = "."
 
     # ============ CopilotKit 配置 ============
-    copilotkit_llm_api_key: str
-    copilotkit_llm_base_url: str
+    copilotkit_llm_api_key: Optional[str] = None
+    copilotkit_llm_base_url: Optional[str] = None
     copilotkit_llm_model: str = "claude-sonnet-4-5"
 
     # ============ 系统提示词配置 ============

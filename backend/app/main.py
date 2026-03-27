@@ -59,14 +59,7 @@ def create_copilotkit_endpoint():
     """创建 CopilotKit Endpoint"""
     try:
         from copilotkit.integrations.fastapi import add_fastapi_endpoint
-        from copilotkit import CopilotKitSDK, CopilotKitContext
-        from langchain_openai import ChatOpenAI
-
-        llm = ChatOpenAI(
-            api_key=settings.copilotkit_llm_api_key,
-            base_url=settings.copilotkit_llm_base_url,
-            model=settings.copilotkit_llm_model,
-        )
+        from copilotkit import CopilotKitRemoteEndpoint
 
         agent = ClaudeCodeAgent(
             name="claude_code",
@@ -74,7 +67,7 @@ def create_copilotkit_endpoint():
             working_dir=settings.working_directory,
         )
 
-        sdk = CopilotKitSDK(
+        sdk = CopilotKitRemoteEndpoint(
             agents=[agent],
         )
 
