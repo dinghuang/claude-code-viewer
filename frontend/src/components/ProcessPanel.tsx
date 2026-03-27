@@ -1,151 +1,88 @@
-import React, { useEffect, useRef } from 'react'
-import { Message, WebSocketState } from '../hooks/useWebSocket'
+// frontend/src/components/ProcessPanel.tsx
+import { useEffect, useRef } from "react";
+import { useProcessStream } from "../hooks/useProcessStream";
+import type { ProcessMessage } from "../types/messages";
 
-interface ProcessPanelProps {
-  messages: Message[]
-  connectionState: WebSocketState
-}
-
-export function ProcessPanel({ messages, connectionState }: ProcessPanelProps) {
-  const panelRef = useRef<HTMLDivElement>(null)
+export function ProcessPanel() {
+  const { messages, isConnected, clearMessages } = useProcessStream();
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (panelRef.current) {
-      panelRef.current.scrollTop = panelRef.current.scrollHeight
+      panelRef.current.scrollTop = panelRef.current.scrollHeight;
     }
-  }, [messages])
+  }, [messages]);
 
   const formatTimestamp = (timestamp: number) => {
-    return new Date(timestamp).toLocaleString('zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      fractionalSecondDigits: 3,
-    })
-  }
-
-  const getMessageTypeColor = (role: string) => {
-    switch (role) {
-      case 'user':
-        return 'border-l-blue-500 bg-blue-50'
-      case 'assistant':
-        return 'border-l-purple-500 bg-purple-50'
-      case 'system':
-        return 'border-l-gray-500 bg-gray-50'
-      default:
-        return 'border-l-gray-300 bg-gray-50'
-    }
-  }
-
-  const statusColors = {
-    connecting: 'bg-yellow-500',
-    connected: 'bg-green-500',
-    disconnected: 'bg-red-500',
-    reconnecting: 'bg-orange-500 animate-pulse',
-    error: 'bg-red-600',
-  }
+    return new Date(timestamp).toLocaleString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  };
 
   return (
     <div className="h-full flex flex-col bg-gray-900 text-gray-100">
       {/* 头部 */}
       <div className="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700">
         <div className="flex items-center gap-2">
-          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          <svg
+            className="w-5 h-5 text-gray-400"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+            />
           </svg>
-          <h2 className="font-semibold text-gray-200">Claude Code 消息流</h2>
+          <h2 className="font-semibold text-gray-200">思维过程</h2>
         </div>
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${statusColors[connectionState.status]}`} />
-          <span className="text-xs text-gray-400">
-            {connectionState.status === 'connected' ? '已连接' : 
-             connectionState.status === 'connecting' ? '连接中...' :
-             connectionState.status === 'reconnecting' ? `重连中(${connectionState.reconnectAttempts})` :
-             connectionState.status === 'error' ? '错误' : '未连接'}
-          </span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div
+              className={`w-2 h-2 rounded-full ${
+                isConnected ? "bg-green-500" : "bg-red-500"
+              }`}
+            />
+            <span className="text-xs text-gray-400">
+              {isConnected ? "已连接" : "未连接"}
+            </span>
+          </div>
+          <button
+            onClick={clearMessages}
+            className="text-xs text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700"
+          >
+            清空
+          </button>
         </div>
       </div>
-
-      {/* 连接错误提示 */}
-      {connectionState.error && (
-        <div className="px-4 py-2 bg-red-900/50 border-b border-red-800 text-red-300 text-xs">
-          ⚠️ {connectionState.error}
-        </div>
-      )}
 
       {/* 消息列表 */}
       <div ref={panelRef} className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-gray-500">
-            <svg className="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            <svg
+              className="w-16 h-16 mb-4 opacity-50"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1}
+                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+              />
             </svg>
-            <p className="text-sm">等待消息...</p>
-            {!connectionState.isConnected && (
-              <p className="text-xs mt-2 text-gray-600">请等待连接建立</p>
-            )}
+            <p className="text-sm">等待 Claude 思考...</p>
           </div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className={`border-l-4 rounded-r-lg p-3 ${getMessageTypeColor(message.role)}`}
-            >
-              {/* 消息头 */}
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className={`px-2 py-0.5 text-xs font-medium rounded ${
-                    message.role === 'user' ? 'bg-blue-200 text-blue-800' :
-                    message.role === 'assistant' ? 'bg-purple-200 text-purple-800' :
-                    'bg-gray-200 text-gray-800'
-                  }`}>
-                    {message.role.toUpperCase()}
-                  </span>
-                  <span className="text-xs text-gray-500 font-mono">
-                    {formatTimestamp(message.timestamp)}
-                  </span>
-                </div>
-                <span className="text-xs text-gray-400 font-mono">
-                  #{message.id.slice(0, 8)}
-                </span>
-              </div>
-
-              {/* 消息内容 */}
-              <div className="text-sm text-gray-700 font-mono whitespace-pre-wrap break-words">
-                {message.content}
-              </div>
-
-              {/* 工具调用 */}
-              {message.toolCalls && message.toolCalls.length > 0 && (
-                <div className="mt-2 space-y-2">
-                  {message.toolCalls.map((tool) => (
-                    <div key={tool.id} className="bg-gray-800 rounded p-2 text-xs">
-                      <div className="flex items-center gap-2 text-yellow-400 mb-1">
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                        <span className="font-semibold">{tool.name}</span>
-                      </div>
-                      <div className="text-gray-400">
-                        <div className="mb-1">Input:</div>
-                        <pre className="bg-gray-900 p-1 rounded overflow-x-auto">
-                          {JSON.stringify(tool.input, null, 2)}
-                        </pre>
-                        {tool.output && (
-                          <>
-                            <div className="mt-1 mb-1">Output:</div>
-                            <pre className="bg-gray-900 p-1 rounded overflow-x-auto text-green-400">
-                              {JSON.stringify(tool.output, null, 2)}
-                            </pre>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+          messages.map((msg) => (
+            <ProcessMessageBlock key={msg.id} message={msg} />
           ))
         )}
       </div>
@@ -153,8 +90,151 @@ export function ProcessPanel({ messages, connectionState }: ProcessPanelProps) {
       {/* 底部统计 */}
       <div className="px-4 py-2 bg-gray-800 border-t border-gray-700 flex items-center justify-between text-xs text-gray-500">
         <span>共 {messages.length} 条消息</span>
-        <span className="font-mono">重连次数: {connectionState.reconnectAttempts}</span>
       </div>
     </div>
-  )
+  );
+}
+
+/** Process message block component */
+function ProcessMessageBlock({ message }: { message: ProcessMessage }) {
+  const getBlockStyle = () => {
+    switch (message.type) {
+      case "thinking":
+        return "bg-gray-800 border-gray-700";
+      case "tool_use":
+        return "bg-blue-900/30 border-blue-700";
+      case "tool_result":
+        return "bg-green-900/30 border-green-700";
+      case "permission":
+        return "bg-yellow-900/30 border-yellow-700";
+      case "result":
+        return "bg-purple-900/30 border-purple-700";
+      case "error":
+        return "bg-red-900/30 border-red-700";
+      default:
+        return "bg-gray-800 border-gray-700";
+    }
+  };
+
+  const getIcon = () => {
+    switch (message.type) {
+      case "thinking":
+        return "💭";
+      case "tool_use":
+        return "⚙️";
+      case "tool_result":
+        return "✓";
+      case "permission":
+        return "🔒";
+      case "result":
+        return "✨";
+      case "error":
+        return "❌";
+      default:
+        return "📝";
+    }
+  };
+
+  const getLabel = () => {
+    switch (message.type) {
+      case "thinking":
+        return "思考";
+      case "tool_use":
+        return "工具调用";
+      case "tool_result":
+        return "工具结果";
+      case "permission":
+        return "权限请求";
+      case "result":
+        return "任务完成";
+      case "error":
+        return "错误";
+      default:
+        return "文本";
+    }
+  };
+
+  return (
+    <div className={`rounded-lg border p-3 text-sm ${getBlockStyle()}`}>
+      {/* 头部 */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span>{getIcon()}</span>
+          <span className="text-xs text-gray-400">{getLabel()}</span>
+          {message.risk_level && (
+            <span
+              className={`text-xs px-1.5 py-0.5 rounded ${
+                message.risk_level === "high"
+                  ? "bg-red-600"
+                  : message.risk_level === "medium"
+                  ? "bg-yellow-600"
+                  : "bg-green-600"
+              }`}
+            >
+              {message.risk_level}
+            </span>
+          )}
+        </div>
+        <span className="text-xs text-gray-500">
+          {new Date(message.timestamp).toLocaleTimeString("zh-CN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })}
+        </span>
+      </div>
+
+      {/* 内容 */}
+      <p className="text-gray-200 whitespace-pre-wrap break-words">
+        {message.content}
+      </p>
+
+      {/* 工具详情 */}
+      {message.tool_name && (
+        <div className="mt-2">
+          <span className="text-xs text-blue-400 font-medium">
+            {message.tool_name}
+          </span>
+        </div>
+      )}
+
+      {/* 工具输入 */}
+      {message.tool_input && (
+        <pre className="mt-2 text-xs text-gray-300 bg-gray-800 rounded p-2 overflow-x-auto">
+          {JSON.stringify(message.tool_input, null, 2)}
+        </pre>
+      )}
+
+      {/* 工具结果 */}
+      {message.tool_result && (
+        <pre className="mt-2 text-xs text-gray-300 bg-gray-800 rounded p-2 overflow-x-auto max-h-40">
+          {typeof message.tool_result === "string"
+            ? message.tool_result
+            : JSON.stringify(message.tool_result, null, 2)}
+        </pre>
+      )}
+
+      {/* 操作列表 */}
+      {message.actions && message.actions.length > 0 && (
+        <div className="mt-2">
+          <span className="text-xs text-gray-400">执行的操作:</span>
+          <ul className="mt-1 space-y-1">
+            {message.actions.map((action, idx) => (
+              <li key={idx} className="text-xs text-gray-300 flex items-start gap-2">
+                <span className="text-green-500">✓</span>
+                <span>{action}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* 费用 */}
+      {message.cost !== undefined && message.cost !== null && (
+        <div className="mt-2 text-xs text-gray-400 flex justify-end">
+          费用: ${message.cost.toFixed(4)}
+        </div>
+      )}
+    </div>
+  );
 }
