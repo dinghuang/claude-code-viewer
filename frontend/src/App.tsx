@@ -1,6 +1,6 @@
 // frontend/src/App.tsx
 import { CopilotKit } from "@copilotkit/react-core";
-import { CopilotPopup } from "@copilotkit/react-ui";
+import { CopilotChat } from "@copilotkit/react-ui";
 import "@copilotkit/react-ui/styles.css";
 import { PhoneFrame } from "./components/PhoneFrame";
 import { ProcessPanel } from "./components/ProcessPanel";
@@ -13,7 +13,6 @@ export default function App() {
 
   return (
     <CopilotKit
-      agent="claude_code"
       runtimeUrl={`${API_URL}/copilotkit`}
     >
       <div className="flex flex-col lg:flex-row h-screen bg-gray-100">
@@ -77,17 +76,13 @@ export default function App() {
 /** CopilotKit chat UI inside phone frame */
 function CopilotChatUI() {
   return (
-    <div className="h-full flex flex-col">
-      {/* CopilotKit 聊天弹窗 */}
-      <CopilotPopup
-        instructions="你是一个 Claude Code 助手，帮助用户执行代码任务。"
-        labels={{
-          title: "Claude Code",
-          initial: "有什么我可以帮你的？",
-          placeholder: "输入你的问题...",
-        }}
-        defaultOpen={true}
-      />
-    </div>
+    <CopilotChat
+      instructions="你是一个 Claude Code 助手，帮助用户执行代码任务。"
+      labels={{
+        title: "Claude Code",
+        initial: "有什么我可以帮你的？",
+        placeholder: "输入你的问题...",
+      }}
+    />
   );
 }
