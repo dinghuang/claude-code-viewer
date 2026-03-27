@@ -61,53 +61,219 @@ claude-code-viewer/
 
 ## 快速开始
 
+### 环境要求
+
+- **Python**: 3.10 - 3.12 (不支持 3.13+)
+- **Node.js**: 18+
+- **Claude Code CLI**: 已安装并配置好
+
+### 第一步：克隆项目
+
+```bash
+git clone <repository-url>
+cd claude-code-viewer
+```
+
+### 第二步：启动后端
+
+```bash
+# 1. 进入后端目录
+cd backend
+
+# 2. 创建虚拟环境
+python -m venv venv
+
+# 3. 激活虚拟环境
+# Linux/Mac:
+source venv/bin/activate
+# Windows:
+# venv\Scripts\activate
+
+# 4. 安装依赖
+pip install -r requirements.txt
+
+# 5. 复制环境变量模板
+cp .env.example .env
+
+# 6. 编辑 .env 文件，配置 API 密钥
+# 必须配置的变量：
+# - ANTHROPIC_API_KEY
+# - ANTHROPIC_AUTH_TOKEN
+# - ANTHROPIC_BASE_URL
+# - ANTHROPIC_MODEL
+
+# 7. 启动后端服务
+uvicorn app.main:app --reload --port 8000
+```
+
+**验证后端启动成功：**
+
+看到以下输出表示启动成功：
+```
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [xxxxx] using WatchFiles
+🚀 Claude Code Viewer 启动中...
+   工作目录: .
+   模型: claude-sonnet-4-5
+   系统提示词已加载 (xxx 字符)
+   CopilotKit 端点已注册: /copilotkit
+```
+
+访问 http://localhost:8000/health 应返回 `{"status": "ok"}`
+
+### 第三步：启动前端
+
+**新开一个终端窗口：**
+
+```bash
+# 1. 进入前端目录
+cd frontend
+
+# 2. 安装依赖
+npm install
+
+# 3. 复制环境变量模板
+cp .env.example .env
+
+# 4. 启动开发服务器
+npm run dev
+```
+
+**验证前端启动成功：**
+
+看到以下输出表示启动成功：
+```
+  VITE v5.x.x  ready in xxx ms
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: use --host to expose
+```
+
+### 第四步：访问应用
+
+打开浏览器访问 http://localhost:3000
+
+## 配置
+
+### 后端环境变量 (.env)
+
+```bash
+# ============ Claude Code SDK 配置 (必填) ============
+ANTHROPIC_API_KEY=your_api_key_here
+ANTHROPIC_AUTH_TOKEN=your_auth_token_here
+ANTHROPIC_BASE_URL=https://api.anthropic.com
+ANTHROPIC_MODEL=claude-sonnet-4-5
+
+# Claude Code CLI 路径 (可选，默认使用系统 PATH 中的 claude)
+# CLAUDE_CODE_CLI_PATH=/usr/local/bin/claude
+
+# ============ CopilotKit LLM 配置 (可选) ============
+# 如果不配置，CopilotKit 将使用默认设置
+COPILOTKIT_LLM_API_KEY=your_api_key_here
+COPILOTKIT_LLM_BASE_URL=https://api.anthropic.com
+COPILOTKIT_LLM_MODEL=claude-sonnet-4-5
+
+# ============ 系统提示词配置 ============
+SYSTEM_PROMPT_PATH=./system_prompt.md
+
+# ============ 服务配置 ============
+HOST=0.0.0.0
+PORT=8000
+DEBUG=true
+```
+
+### 前端环境变量 (.env)
+
+```bash
+# 后端 API 地址
+VITE_API_URL=http://localhost:8000
+```
+
+## 常见问题
+
+### 后端启动失败
+
+**问题: `ModuleNotFoundError: No module named 'langgraph'`**
+
+解决: 确保安装了所有依赖
+```bash
+pip install -r requirements.txt
+```
+
+**问题: Python 版本不兼容**
+
+解决: CopilotKit 要求 Python 3.10-3.12，不支持 3.13+
+```bash
+# 使用 pyenv 切换 Python 版本
+pyenv install 3.12
+pyenv local 3.12
+```
+
+**问题: `ValidationError` 配置错误**
+
+解决: 确保 `.env` 文件中配置了所有必填变量
+- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_AUTH_TOKEN`
+- `ANTHROPIC_BASE_URL`
+
+### 前端启动失败
+
+**问题: `npm install` 失败**
+
+解决: 清除缓存后重试
+```bash
+rm -rf node_modules package-lock.json
+npm install
+```
+
+**问题: 页面空白或连接失败**
+
+解决:
+1. 确认后端已启动 (访问 http://localhost:8000/health)
+2. 检查前端 `.env` 中的 `VITE_API_URL` 是否正确
+3. 检查浏览器控制台是否有跨域错误
+
+### Claude Code CLI 相关
+
+**问题: Claude Code CLI 未找到**
+
+解决: 确保 Claude Code CLI 已安装并在 PATH 中
+```bash
+# 检查是否安装
+which claude
+
+# 如果未安装，按照官方文档安装
+```
+
+## 开发命令
+
 ### 后端
 
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或 venv\Scripts\activate  # Windows
-pip install -r requirements.txt
-cp .env.example .env
-# 编辑 .env 配置 API 密钥
+# 启动开发服务器 (热重载)
 uvicorn app.main:app --reload --port 8000
+
+# 启动生产服务器
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# 查看 API 文档
+# 访问 http://localhost:8000/docs
 ```
 
 ### 前端
 
 ```bash
-cd frontend
-npm install
-cp .env.example .env
-# 编辑 .env 配置
+# 启动开发服务器
 npm run dev
-```
 
-## 配置
+# 构建生产版本
+npm run build
 
-### 环境变量
+# 预览生产版本
+npm run preview
 
-后端 (.env):
-```bash
-# Claude Code SDK 配置
-ANTHROPIC_API_KEY=your_api_key
-ANTHROPIC_AUTH_TOKEN=your_auth_token
-ANTHROPIC_BASE_URL=https://api.anthropic.com
-ANTHROPIC_MODEL=claude-sonnet-4-5
-
-# CopilotKit LLM 配置
-COPILOTKIT_LLM_API_KEY=your_api_key
-COPILOTKIT_LLM_BASE_URL=https://api.anthropic.com
-COPILOTKIT_LLM_MODEL=claude-sonnet-4-5
-
-# 系统提示词配置
-SYSTEM_PROMPT_PATH=./system_prompt.md
-```
-
-前端 (.env):
-```bash
-VITE_API_URL=http://localhost:8000
+# 代码检查
+npm run lint
 ```
 
 ## 文档
