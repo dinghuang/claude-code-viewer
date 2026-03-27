@@ -37,58 +37,193 @@ export interface SummaryData {
   actions: string[]
 }
 
+export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'error'
+
+export interface WebSocketState {
+  isConnected: boolean
+  status: ConnectionStatus
+  error: string | null
+  reconnectAttempts: number
+}
+
 interface WebSocketHook {
   sendResponse: (response: any) => void
-  isConnected: boolean
+  sendTask: (task: string) => void
+  reconnect: () => void
+  disconnect: () => void
+  state: WebSocketState
+}
+
+// 重连配置
+const RECONNECT_CONFIG = {
+  maxAttempts: 10,
+  baseDelay: 1000, // 1秒
+  maxDelay: 30000, // 30秒
+  backoffMultiplier: 1.5,
+}
+
+// 计算重连延迟（指数退避）
+function getReconnectDelay(attempt: number): number {
+  const delay = Math.min(
+    RECONNECT_CONFIG.baseDelay * Math.pow(RECONNECT_CONFIG.backoffMultiplier, attempt),
+    RECONNECT_CONFIG.maxDelay
+  )
+  // 添加随机抖动避免同时重连
+  return delay + Math.random() * 1000
 }
 
 export function useWebSocket(onMessage: (data: any) => void): WebSocketHook {
   const wsRef = useRef<WebSocket | null>(null)
-  const [isConnected, setIsConnected] = useState(false)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>()
+  const reconnectAttemptsRef = useRef(0)
+  const isManualCloseRef = useRef(false)
+  const messageQueueRef = useRef<any[]>([])
+  
+  const [state, setState] = useState<WebSocketState>({
+    isConnected: false,
+    status: 'connecting',
+    error: null,
+    reconnectAttempts: 0,
+  })
+
+  const processMessageQueue = useCallback(() => {
+    // 连接恢复后发送排队的消息
+    while (messageQueueRef.current.length > 0 && 
+           wsRef.current?.readyState === WebSocket.OPEN) {
+      const message = messageQueueRef.current.shift()
+      wsRef.current.send(JSON.stringify(message))
+      console.log('📤 Sent queued message:', message.type)
+    }
+  }, [])
 
   const connect = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      return
+    }
+
     const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws'
-    const ws = new WebSocket(wsUrl)
-    wsRef.current = ws
+    
+    setState(prev => ({
+      ...prev,
+      status: reconnectAttemptsRef.current > 0 ? 'reconnecting' : 'connecting',
+      error: null,
+    }))
 
-    ws.onopen = () => {
-      console.log('WebSocket connected')
-      setIsConnected(true)
-    }
+    try {
+      const ws = new WebSocket(wsUrl)
+      wsRef.current = ws
 
-    ws.onclose = () => {
-      console.log('WebSocket disconnected')
-      setIsConnected(false)
-      // 重连逻辑
-      reconnectTimeoutRef.current = setTimeout(() => {
-        connect()
-      }, 3000)
-    }
+      ws.onopen = () => {
+        console.log('✅ WebSocket connected')
+        isManualCloseRef.current = false
+        reconnectAttemptsRef.current = 0
+        
+        setState({
+          isConnected: true,
+          status: 'connected',
+          error: null,
+          reconnectAttempts: 0,
+        })
 
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error)
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        onMessage(data)
-      } catch (e) {
-        console.error('Failed to parse message:', e)
+        // 处理排队的消息
+        processMessageQueue()
       }
+
+      ws.onclose = (event) => {
+        console.log('🔌 WebSocket disconnected', event.code, event.reason)
+        wsRef.current = null
+        
+        setState(prev => ({
+          ...prev,
+          isConnected: false,
+          status: 'disconnected',
+        }))
+
+        // 如果不是手动关闭，尝试重连
+        if (!isManualCloseRef.current && reconnectAttemptsRef.current < RECONNECT_CONFIG.maxAttempts) {
+          const delay = getReconnectDelay(reconnectAttemptsRef.current)
+          console.log(`🔄 Reconnecting in ${Math.round(delay / 1000)}s (attempt ${reconnectAttemptsRef.current + 1}/${RECONNECT_CONFIG.maxAttempts})`)
+          
+          setState(prev => ({
+            ...prev,
+            status: 'reconnecting',
+            reconnectAttempts: reconnectAttemptsRef.current,
+          }))
+
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectAttemptsRef.current++
+            connect()
+          }, delay)
+        } else if (reconnectAttemptsRef.current >= RECONNECT_CONFIG.maxAttempts) {
+          console.error('❌ Max reconnect attempts reached')
+          setState(prev => ({
+            ...prev,
+            status: 'error',
+            error: '连接失败，请刷新页面重试',
+          }))
+        }
+      }
+
+      ws.onerror = (error) => {
+        console.error('❌ WebSocket error:', error)
+        setState(prev => ({
+          ...prev,
+          error: '连接发生错误',
+        }))
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          onMessage(data)
+        } catch (e) {
+          console.error('Failed to parse message:', e)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to create WebSocket:', error)
+      setState(prev => ({
+        ...prev,
+        status: 'error',
+        error: '无法建立连接',
+      }))
     }
-  }, [onMessage])
+  }, [onMessage, processMessageQueue])
+
+  const disconnect = useCallback(() => {
+    isManualCloseRef.current = true
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current)
+    }
+    if (wsRef.current) {
+      wsRef.current.close(1000, 'Manual disconnect')
+      wsRef.current = null
+    }
+    setState({
+      isConnected: false,
+      status: 'disconnected',
+      error: null,
+      reconnectAttempts: 0,
+    })
+  }, [])
+
+  const reconnect = useCallback(() => {
+    disconnect()
+    reconnectAttemptsRef.current = 0
+    isManualCloseRef.current = false
+    setTimeout(connect, 100)
+  }, [connect, disconnect])
 
   useEffect(() => {
     connect()
 
     return () => {
+      isManualCloseRef.current = true
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current)
       }
       if (wsRef.current) {
-        wsRef.current.close()
+        wsRef.current.close(1000, 'Component unmount')
       }
     }
   }, [connect])
@@ -97,9 +232,31 @@ export function useWebSocket(onMessage: (data: any) => void): WebSocketHook {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(response))
     } else {
-      console.warn('WebSocket is not connected')
+      console.warn('WebSocket is not connected, queuing message')
+      // 将消息加入队列，等待重连后发送
+      messageQueueRef.current.push(response)
     }
   }, [])
 
-  return { sendResponse, isConnected }
+  const sendTask = useCallback((task: string) => {
+    const message = {
+      type: 'start_task',
+      task,
+    }
+    
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(message))
+    } else {
+      console.warn('WebSocket is not connected, queuing task')
+      messageQueueRef.current.push(message)
+    }
+  }, [])
+
+  return { 
+    sendResponse, 
+    sendTask, 
+    reconnect,
+    disconnect,
+    state,
+  }
 }

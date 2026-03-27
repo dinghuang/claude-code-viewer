@@ -1,12 +1,12 @@
 import React, { useEffect, useRef } from 'react'
-import { Message } from '../hooks/useWebSocket'
+import { Message, WebSocketState } from '../hooks/useWebSocket'
 
 interface ProcessPanelProps {
   messages: Message[]
-  isConnected: boolean
+  connectionState: WebSocketState
 }
 
-export function ProcessPanel({ messages, isConnected }: ProcessPanelProps) {
+export function ProcessPanel({ messages, connectionState }: ProcessPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -37,6 +37,14 @@ export function ProcessPanel({ messages, isConnected }: ProcessPanelProps) {
     }
   }
 
+  const statusColors = {
+    connecting: 'bg-yellow-500',
+    connected: 'bg-green-500',
+    disconnected: 'bg-red-500',
+    reconnecting: 'bg-orange-500 animate-pulse',
+    error: 'bg-red-600',
+  }
+
   return (
     <div className="h-full flex flex-col bg-gray-900 text-gray-100">
       {/* 头部 */}
@@ -48,10 +56,22 @@ export function ProcessPanel({ messages, isConnected }: ProcessPanelProps) {
           <h2 className="font-semibold text-gray-200">Claude Code 消息流</h2>
         </div>
         <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-          <span className="text-xs text-gray-400">{isConnected ? '已连接' : '未连接'}</span>
+          <div className={`w-2 h-2 rounded-full ${statusColors[connectionState.status]}`} />
+          <span className="text-xs text-gray-400">
+            {connectionState.status === 'connected' ? '已连接' : 
+             connectionState.status === 'connecting' ? '连接中...' :
+             connectionState.status === 'reconnecting' ? `重连中(${connectionState.reconnectAttempts})` :
+             connectionState.status === 'error' ? '错误' : '未连接'}
+          </span>
         </div>
       </div>
+
+      {/* 连接错误提示 */}
+      {connectionState.error && (
+        <div className="px-4 py-2 bg-red-900/50 border-b border-red-800 text-red-300 text-xs">
+          ⚠️ {connectionState.error}
+        </div>
+      )}
 
       {/* 消息列表 */}
       <div ref={panelRef} className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -61,6 +81,9 @@ export function ProcessPanel({ messages, isConnected }: ProcessPanelProps) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
             <p className="text-sm">等待消息...</p>
+            {!connectionState.isConnected && (
+              <p className="text-xs mt-2 text-gray-600">请等待连接建立</p>
+            )}
           </div>
         ) : (
           messages.map((message) => (
@@ -128,8 +151,9 @@ export function ProcessPanel({ messages, isConnected }: ProcessPanelProps) {
       </div>
 
       {/* 底部统计 */}
-      <div className="px-4 py-2 bg-gray-800 border-t border-gray-700 text-xs text-gray-500">
-        共 {messages.length} 条消息
+      <div className="px-4 py-2 bg-gray-800 border-t border-gray-700 flex items-center justify-between text-xs text-gray-500">
+        <span>共 {messages.length} 条消息</span>
+        <span className="font-mono">重连次数: {connectionState.reconnectAttempts}</span>
       </div>
     </div>
   )
