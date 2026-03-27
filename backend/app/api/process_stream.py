@@ -2,7 +2,7 @@
 """Process Stream SSE endpoint for broadcasting Claude's thinking process."""
 
 from fastapi import APIRouter
-from sse_starlette.sse import EventSourceResponse
+from sse_starlette import EventSourceResponse
 import json
 import asyncio
 from typing import List
