@@ -234,6 +234,67 @@ button:focus {
   outline: none;
 }
 
+/* ========== CopilotKit 主题覆盖 ========== */
+:root {
+  --copilot-kit-primary-color: #6366f1;
+  --copilot-kit-contrast-color: #ffffff;
+  --copilot-kit-background-color: #ffffff;
+  --copilot-kit-secondary-color: #ffffff;
+  --copilot-kit-secondary-contrast-color: #1e293b;
+  --copilot-kit-separator-color: #e2e8f0;
+  --copilot-kit-muted-color: #cbd5e1;
+  --copilot-kit-input-background-color: #f8fafc;
+}
+
+/* 用户消息气泡 — 渐变蓝紫 + 柔和圆角 */
+.copilotKitMessage.copilotKitUserMessage {
+  background: linear-gradient(135deg, #6366f1, #818cf8) !important;
+  color: #ffffff !important;
+  border-radius: 18px 18px 4px 18px !important;
+  padding: 10px 16px !important;
+  font-size: 0.9rem !important;
+  line-height: 1.6 !important;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25) !important;
+  max-width: 85% !important;
+}
+
+/* 助手消息 — 清爽风格 */
+.copilotKitMessage.copilotKitAssistantMessage {
+  color: #334155 !important;
+  font-size: 0.9rem !important;
+  line-height: 1.7 !important;
+}
+
+/* 头部栏 — 白底 + 底部细线 */
+.copilotKitHeader {
+  background: #ffffff !important;
+  color: #1e293b !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  font-size: 0.95rem !important;
+}
+
+/* 输入框 �� 更柔和的边框 */
+.copilotKitInput {
+  border: 1.5px solid #e2e8f0 !important;
+  background-color: #f8fafc !important;
+  border-radius: 22px !important;
+  transition: border-color 0.2s ease !important;
+}
+
+.copilotKitInput:focus-within {
+  border-color: #a5b4fc !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1) !important;
+}
+
+/* 发送按钮颜色匹配 */
+.copilotKitInputControlButton:not([disabled]) {
+  color: #6366f1 !important;
+}
+
+.copilotKitInputControlButton:not([disabled]):hover {
+  color: #4f46e5 !important;
+}
+
 /* CopilotKit chat layout fix — input pinned at bottom, messages scroll */
 .copilotKitChat {
   display: flex !important;
