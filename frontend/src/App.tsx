@@ -1,9 +1,12 @@
 // frontend/src/App.tsx
 import { CopilotKit } from "@copilotkit/react-core";
 import { CopilotChat } from "@copilotkit/react-ui";
+import { useCoAgentStateRender } from "@copilotkit/react-core";
 import "@copilotkit/react-ui/styles.css";
 import { PhoneFrame } from "./components/PhoneFrame";
 import { ProcessPanel } from "./components/ProcessPanel";
+import { PermissionDialog } from "./components/PermissionDialog";
+import type { PermissionData } from "./components/PermissionDialog";
 import { useState } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -48,13 +51,11 @@ export default function App() {
             showPanel ? "hidden lg:flex" : "flex"
           } lg:w-1/2 items-center justify-center p-4 lg:p-8 bg-gradient-to-br from-gray-200 to-gray-300 overflow-auto`}
         >
-          {/* 移动端自适应尺寸 */}
           <div className="lg:hidden w-full max-w-[375px] mx-auto">
             <PhoneFrame>
               <CopilotChatUI />
             </PhoneFrame>
           </div>
-          {/* 桌面端固定尺寸 */}
           <div className="hidden lg:block">
             <PhoneFrame>
               <CopilotChatUI />
@@ -75,8 +76,15 @@ export default function App() {
   );
 }
 
-/** CopilotKit chat UI inside phone frame */
+/** CopilotKit chat UI with permission state rendering */
 function CopilotChatUI() {
+  useCoAgentStateRender({
+    name: "claude_code",
+    render: ({ state, nodeName, status }) => {
+      return null;
+    },
+  });
+
   return (
     <CopilotChat
       instructions="你是一个 Claude Code 助手，帮助用户执行代码任务。"

@@ -1,5 +1,4 @@
 // frontend/src/components/PermissionDialog.tsx
-import React from "react";
 
 interface PermissionData {
   request_id: string;
