@@ -1,16 +1,19 @@
 # backend/app/main.py
-"""FastAPI 主入口 - 集成 CopilotKit 和 Claude SDK"""
+"""FastAPI entry point — AG-UI endpoint with Claude Code LangGraph Agent."""
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
+import warnings
 
 from app.config import get_settings
-from app.agents.claude_code_agent import ClaudeCodeAgent
 from app.api import process_stream
+from app.agents.claude_code_agent import build_graph
+from ag_ui_langgraph import LangGraphAgent, add_langgraph_fastapi_endpoint
 
-# 配置日志
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -19,17 +22,18 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期管理"""
     logger.info("🚀 Claude Code Viewer 启动中...")
     logger.info(f"   工作目录: {settings.working_directory}")
     logger.info(f"   模型: {settings.anthropic_model}")
 
-    # 检查系统提示词
     system_prompt = settings.get_system_prompt()
     if system_prompt:
         logger.info(f"   系统提示词已加载 ({len(system_prompt)} 字符)")
     else:
         logger.warning("   未找到系统提示词文件")
+
+    logger.info("   AG-UI 端点: POST /")
+    logger.info("   SSE 端点: GET /api/process-stream")
 
     yield
     logger.info("👋 Claude Code Viewer 关闭中...")
@@ -38,11 +42,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Claude Code Viewer",
     description="可视化 Claude Code 执行过程",
-    version="0.2.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
-# CORS 配置
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -51,56 +54,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 注册 API 路由
+# SSE thinking process
 app.include_router(process_stream.router, prefix="/api", tags=["stream"])
 
+# Claude Code LangGraph Agent
+compiled_graph = build_graph()
 
-def create_copilotkit_endpoint():
-    """创建 CopilotKit Endpoint"""
-    try:
-        from copilotkit.integrations.fastapi import add_fastapi_endpoint
-        from copilotkit import CopilotKitRemoteEndpoint
+agent = LangGraphAgent(
+    name="claude_code",
+    description="Claude Code 助手 - 执行代码任务",
+    graph=compiled_graph,
+)
 
-        agent = ClaudeCodeAgent(
-            name="claude_code",
-            description="Claude Code 助手 - 执行代码任务",
-            working_dir=settings.working_directory,
-        )
-
-        sdk = CopilotKitRemoteEndpoint(
-            agents=[agent],
-        )
-
-        # 注册 CopilotKit 端点
-        add_fastapi_endpoint(app, sdk, "/copilotkit")
-
-        logger.info("   CopilotKit 端点已注册: /copilotkit")
-        return sdk
-
-    except ImportError as e:
-        logger.warning(f"CopilotKit 未安装，跳过集成: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"CopilotKit 集成失败: {e}")
-        return None
-
-
-# 注册 CopilotKit 端点
-copilotkit_sdk = create_copilotkit_endpoint()
-
-
-@app.get("/")
-async def root():
-    """根路径"""
-    return {
-        "name": "Claude Code Viewer API",
-        "version": "0.2.0",
-        "docs": "/docs",
-        "copilotkit": "/copilotkit" if copilotkit_sdk else None,
-    }
+add_langgraph_fastapi_endpoint(app, agent, path="/")
 
 
 @app.get("/health")
 async def health():
-    """健康检查"""
     return {"status": "ok"}
