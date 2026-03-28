@@ -1,0 +1,57 @@
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - SSL_KEYFILE=/certs/server.key
+      - SSL_CERTFILE=/certs/server.crt
+      - WORKING_DIRECTORY=/workspace
+    volumes:
+      - ./certs:/certs:ro
+      - ./backend/system_prompt.md:/app/system_prompt.md:ro
+      - ./backend/user_info.md:/app/user_info.md:ro
+      # Mount your project directory for Claude Code to work on
+      # - /path/to/your/project:/workspace
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "https://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  runtime:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.runtime
+    ports:
+      - "4000:4000"
+    environment:
+      - AGENT_URL=https://backend:8000
+      - RUNTIME_PORT=4000
+      - SSL_KEYFILE=/certs/server.key
+      - SSL_CERTFILE=/certs/server.crt
+      - NODE_TLS_REJECT_UNAUTHORIZED=0
+    volumes:
+      - ./certs:/certs:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: https://localhost:8000
+        VITE_COPILOTKIT_RUNTIME_URL: https://localhost:4000
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./certs:/certs:ro
+    depends_on:
+      - runtime

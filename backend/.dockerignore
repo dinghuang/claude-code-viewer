@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+.env
+.git
+.gitignore
+*.md
+!system_prompt.md
+!user_info.md
+!requirements.txt

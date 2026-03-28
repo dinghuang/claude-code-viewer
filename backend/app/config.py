@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     system_prompt_path: str = "./system_prompt.md"
     user_info_path: str = "./user_info.md"
 
+    # ============ SSL 配置 ============
+    ssl_keyfile: Optional[str] = None
+    ssl_certfile: Optional[str] = None
+
     # ============ 服务配置 ============
     host: str = "0.0.0.0"
     port: int = 8000

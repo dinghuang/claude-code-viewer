@@ -33,3 +33,9 @@ npm-debug.log*
 # Test
 coverage/
 .coverage
+
+# Certificates (generated)
+certs/*.key
+certs/*.crt
+certs/*.csr
+certs/*.srl
