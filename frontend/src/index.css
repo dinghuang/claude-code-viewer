@@ -252,6 +252,85 @@ button:focus {
   flex-shrink: 0 !important;
 }
 
+/* ========== CopilotKit Markdown — 卡片化表格 ========== */
+.copilotKitMarkdown table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0.75rem 0;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
+  border: 1px solid #e5e7eb;
+  font-size: 0.8rem;
+}
+
+.copilotKitMarkdown thead {
+  background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+}
+
+.copilotKitMarkdown th {
+  padding: 0.6rem 0.8rem;
+  text-align: left;
+  font-weight: 600;
+  color: #334155;
+  border-bottom: 2px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+.copilotKitMarkdown td {
+  padding: 0.5rem 0.8rem;
+  color: #475569;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.copilotKitMarkdown tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.copilotKitMarkdown tbody tr:hover td {
+  background-color: #f8fafc;
+}
+
+.copilotKitMarkdown tbody tr:nth-child(even) td {
+  background-color: #fafbfc;
+}
+
+.copilotKitMarkdown tbody tr:nth-child(even):hover td {
+  background-color: #f1f5f9;
+}
+
+/* ========== CopilotKit Markdown — 代码块卡片化 ========== */
+.copilotKitMarkdown pre {
+  border-radius: 10px !important;
+  border: 1px solid #e5e7eb !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
+  margin: 0.75rem 0 !important;
+  overflow-x: auto;
+}
+
+/* ========== CopilotKit Markdown — 引用块卡片化 ========== */
+.copilotKitMarkdown blockquote {
+  border-left: 3px solid #3b82f6 !important;
+  background: #f0f7ff !important;
+  border-radius: 0 8px 8px 0 !important;
+  padding: 0.6rem 1rem !important;
+  margin: 0.75rem 0 !important;
+  color: #1e40af !important;
+}
+
+/* ========== CopilotKit Markdown — 列表美化 ========== */
+.copilotKitMarkdown ul,
+.copilotKitMarkdown ol {
+  padding-left: 1.5rem;
+  margin: 0.5rem 0;
+}
+
+.copilotKitMarkdown li {
+  margin: 0.25rem 0;
+  line-height: 1.6;
+}
+
 /* 横屏适配 */
 @media (max-height: 500px) and (orientation: landscape) {
   .phone-frame-container {
