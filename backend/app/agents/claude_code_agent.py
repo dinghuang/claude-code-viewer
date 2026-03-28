@@ -108,10 +108,18 @@ def convert_to_process_messages(msg) -> list[ProcessMessage]:
             if isinstance(block, ToolResultBlock):
                 msg_id = str(uuid.uuid4())
                 content = block.content if isinstance(block.content, str) else str(block.content)
-                results.append(ProcessMessage(
-                    id=msg_id, type=ProcessMessageType.TOOL_RESULT,
-                    content=content[:1000], timestamp=ts, tool_result=block.content,
-                ))
+                is_permission_denial = block.is_error and "permission" in content.lower()
+                if is_permission_denial:
+                    results.append(ProcessMessage(
+                        id=msg_id, type=ProcessMessageType.PERMISSION,
+                        content=content[:1000], timestamp=ts,
+                        risk_level="high",
+                    ))
+                else:
+                    results.append(ProcessMessage(
+                        id=msg_id, type=ProcessMessageType.TOOL_RESULT,
+                        content=content[:1000], timestamp=ts, tool_result=block.content,
+                    ))
 
     elif isinstance(msg, ClaudeSystemMessage):
         msg_id = str(uuid.uuid4())
