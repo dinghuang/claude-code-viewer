@@ -178,10 +178,11 @@ claude-code-viewer/
 └── docs/                             # 设计文档
     ├── index.md
     ├── architecture.md
-    ├── runtime.md                    # NEW: Runtime 中间层文档
+    ├── runtime.md                    # Runtime 中间层文档
     ├── backend.md
     ├── frontend.md
     ├── data-flow.md
     ├── configuration.md
-    └── copilotkit-integration.md
+    ├── copilotkit-integration.md
+    └── mcp.md                        # MCP 服务器配置
 ```

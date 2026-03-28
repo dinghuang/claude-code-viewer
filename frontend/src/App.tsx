@@ -132,10 +132,10 @@ function CopilotChatUI() {
 
   return (
     <CopilotChat
-      instructions="你是一个 Claude Code 助手，帮助用户执行代码任务。"
+      instructions="你是一个 AI智能投顾，帮助用户解决投资问题。"
       labels={{
-        title: "Claude Code",
-        initial: "有什么我可以帮你的？",
+        title: "AI智能投顾",
+        initial: "您好，我是您的AI智能投顾，有什么我可以帮你的？",
         placeholder: "输入你的问题...",
       }}
     />

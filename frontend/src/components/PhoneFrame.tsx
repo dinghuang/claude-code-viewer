@@ -54,7 +54,7 @@ export function PhoneFrame({ children }: PhoneFrameProps) {
 
           {/* 应用标题栏 */}
           <div className="h-14 bg-primary-500 flex items-center justify-center shrink-0">
-            <h1 className="text-white text-lg font-semibold">Claude Code</h1>
+            <h1 className="text-white text-lg font-semibold">AI智能投顾</h1>
           </div>
 
           {/* 内容区域 — flex-1 + min-h-0 确保 CopilotChat 内部可以正确 flex 布局和滚动 */}

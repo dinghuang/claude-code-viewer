@@ -52,7 +52,7 @@ export function CopilotChat({ messages }: CopilotChatProps) {
           <svg className="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
-          <p className="text-sm">等待连接 Claude Code...</p>
+          <p className="text-sm">等待连接 AI智能投顾...</p>
         </div>
       ) : (
         messages.map((message) => (

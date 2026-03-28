@@ -71,8 +71,8 @@ export default function App() {
       agent="claude_code"
     >
       <CopilotChat
-        instructions="你是一个 Claude Code 助手"
-        labels={{ title: "Claude Code", initial: "有什么我可以帮你的？" }}
+        instructions="你是一个 AI智能投顾"
+        labels={{ title: "AI智能投顾", initial: "您好，我是您的AI智能投顾，有什么我可以帮你的？" }}
       />
     </CopilotKit>
   );

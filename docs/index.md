@@ -25,6 +25,7 @@
 | 文档 | 说明 | 路径 |
 |------|------|------|
 | [CopilotKit 集成](copilotkit-integration.md) | CopilotKit v1.54.1 三层集成说明 | `docs/copilotkit-integration.md` |
+| [MCP 服务器配置](mcp.md) | 6 个 MCP 服务器：金融数据、新闻搜索、网页研究 | `docs/mcp.md` |
 
 ## 快速开始
 
