@@ -234,6 +234,24 @@ button:focus {
   outline: none;
 }
 
+/* CopilotKit chat layout fix — input pinned at bottom, messages scroll */
+.copilotKitChat {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+.copilotKitMessages {
+  flex: 1 1 0% !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+}
+
+.copilotKitInput {
+  flex-shrink: 0 !important;
+}
+
 /* 横屏适配 */
 @media (max-height: 500px) and (orientation: landscape) {
   .phone-frame-container {

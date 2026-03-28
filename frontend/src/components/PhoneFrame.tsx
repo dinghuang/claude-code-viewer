@@ -1,8 +1,25 @@
 // frontend/src/components/PhoneFrame.tsx
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
 
 interface PhoneFrameProps {
   children: ReactNode;
+}
+
+function Clock24() {
+  const [time, setTime] = useState(() => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  });
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = new Date();
+      setTime(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`);
+    }, 10000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return <span className="text-xs font-medium text-gray-800">{time}</span>;
 }
 
 export function PhoneFrame({ children }: PhoneFrameProps) {
@@ -18,8 +35,8 @@ export function PhoneFrame({ children }: PhoneFrameProps) {
           </div>
 
           {/* 状态栏 */}
-          <div className="h-12 bg-white flex items-center justify-between px-6 pt-3">
-            <span className="text-xs font-medium text-gray-800">9:41</span>
+          <div className="h-12 bg-white flex items-center justify-between px-6 pt-3 shrink-0">
+            <Clock24 />
             <div className="flex items-center gap-1">
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm0 16c-3.86 0-7-3.14-7-7s3.14-7 7-7 7 3.14 7 7-3.14 7-7 7z" />
@@ -36,12 +53,12 @@ export function PhoneFrame({ children }: PhoneFrameProps) {
           </div>
 
           {/* 应用标题栏 */}
-          <div className="h-14 bg-primary-500 flex items-center justify-center">
+          <div className="h-14 bg-primary-500 flex items-center justify-center shrink-0">
             <h1 className="text-white text-lg font-semibold">Claude Code</h1>
           </div>
 
-          {/* 内容区域 */}
-          <div className="flex-1 overflow-auto">
+          {/* 内容区域 — flex-1 + min-h-0 确保 CopilotChat 内部可以正确 flex 布局和滚动 */}
+          <div className="flex-1 min-h-0 flex flex-col">
             {children}
           </div>
 

@@ -28,7 +28,7 @@ export default function App() {
       runtimeUrl={`${RUNTIME_URL}/copilotkit`}
       agent="claude_code"
     >
-      {/* System prompt editor floating panel */}
+      {/* System prompt editor — fixed bottom-left */}
       <SystemPromptPanel value={systemPrompt} onChange={setSystemPrompt} />
 
       <div className="flex flex-col lg:flex-row h-screen bg-gray-100">
@@ -56,11 +56,11 @@ export default function App() {
           </button>
         </div>
 
-        {/* 左侧：手机框架内的 CopilotKit UI */}
+        {/* 左侧：手机框架 — shrink-0 保持手机宽度，不参与 flex 拉伸 */}
         <div
           className={`${
             showPanel ? "hidden lg:flex" : "flex"
-          } lg:w-1/2 items-center justify-center p-4 lg:p-8 bg-gradient-to-br from-gray-200 to-gray-300 overflow-auto`}
+          } shrink-0 items-center justify-center p-4 lg:p-6 bg-gradient-to-br from-gray-200 to-gray-300`}
         >
           <div className="lg:hidden w-full max-w-[375px] mx-auto">
             <PhoneFrame>
@@ -74,11 +74,11 @@ export default function App() {
           </div>
         </div>
 
-        {/* 右侧：思维过程面板 */}
+        {/* 右侧：思维过程面板 — flex-1 占满剩余空间 */}
         <div
           className={`${
             showPanel ? "flex" : "hidden lg:flex"
-          } lg:w-1/2 lg:border-l border-gray-300 flex-col`}
+          } flex-1 min-w-0 lg:border-l border-gray-300 flex-col`}
         >
           <ProcessPanel />
         </div>
