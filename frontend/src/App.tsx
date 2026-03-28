@@ -2,8 +2,10 @@
 import { CopilotKit, useCoAgentStateRender } from "@copilotkit/react-core";
 import { CopilotChat } from "@copilotkit/react-ui";
 import "@copilotkit/react-ui/styles.css";
+import { useLangGraphInterrupt } from "@copilotkit/react-core";
 import { PhoneFrame } from "./components/PhoneFrame";
 import { ProcessPanel } from "./components/ProcessPanel";
+import { PermissionCard } from "./components/PermissionDialog";
 import { SettingsPanel, DEFAULT_PROMPT } from "./components/SystemPromptPanel";
 import { useState, useEffect } from "react";
 
@@ -100,12 +102,31 @@ export default function App() {
   );
 }
 
-/** CopilotKit chat UI with permission state rendering */
+/** CopilotKit chat UI with permission interrupt rendering */
 function CopilotChatUI() {
   useCoAgentStateRender({
     name: "claude_code",
     render: (_args: any) => {
       return null;
+    },
+  });
+
+  // Render permission cards when LangGraph interrupts for permission denials
+  useLangGraphInterrupt({
+    enabled: ({ eventValue }: any) => {
+      return eventValue?.type === "permission_request";
+    },
+    render: ({ event, resolve }: any) => {
+      const value = event?.value || event || {};
+      return (
+        <PermissionCard
+          denials={value.denials || []}
+          message={value.message || "权限请求"}
+          onRespond={(approved: boolean) => {
+            resolve(JSON.stringify({ approved }));
+          }}
+        />
+      );
     },
   });
 

@@ -41,6 +41,8 @@ class ClaudeCodeState(MessagesState):
     claude_result: str
     claude_cost: float
     claude_duration_ms: int
+    permission_denials: list          # from ResultMessage.permission_denials
+    retry_with_bypass: bool           # set when user approves denied permissions
     pending_permission: Optional[Dict[str, Any]]
     permission_response: Optional[Dict[str, Any]]
     error: str
@@ -234,7 +236,18 @@ async def execute_node(state: ClaudeCodeState):
 
     base_opts = build_claude_options()
     system_prompt = get_effective_system_prompt() if not state.get("system_prompt_loaded") else None
-    perm_mode = get_permission_mode()
+
+    # If retrying after user approved permissions, force bypassPermissions
+    if state.get("retry_with_bypass"):
+        perm_mode = "bypassPermissions"
+        await broadcast_to_subscribers(ProcessMessage(
+            id=str(uuid.uuid4()),
+            type=ProcessMessageType.TEXT,
+            content="[用户已授权] 以 bypassPermissions 模式重新执行...",
+            timestamp=int(time.time() * 1000),
+        ))
+    else:
+        perm_mode = get_permission_mode()
 
     options = ClaudeAgentOptions(
         **base_opts,
@@ -245,6 +258,7 @@ async def execute_node(state: ClaudeCodeState):
     result_text = ""
     cost = 0.0
     duration = 0
+    denials = []
 
     try:
         async for msg in query(prompt=user_message, options=options):
@@ -256,6 +270,7 @@ async def execute_node(state: ClaudeCodeState):
                 result_text = msg.result or "任务完成"
                 cost = msg.total_cost_usd or 0.0
                 duration = msg.duration_ms or 0
+                denials = msg.permission_denials or []
 
     except Exception as e:
         logger.error(f"Claude SDK error: {e}")
@@ -272,7 +287,67 @@ async def execute_node(state: ClaudeCodeState):
         "claude_cost": cost,
         "claude_duration_ms": duration,
         "system_prompt_loaded": True,
+        "permission_denials": denials,
+        "retry_with_bypass": False,
     }
+
+
+async def permission_check_node(state: ClaudeCodeState):
+    """Check for permission denials and interrupt if any.
+
+    If tools were denied, interrupt the graph with the denial list.
+    Frontend renders a permission card. When user responds:
+    - approved → set retry_with_bypass=True, route back to execute
+    - denied → proceed to collect with the denied result
+    """
+    denials = state.get("permission_denials", [])
+    if not denials:
+        return {}
+
+    # Build a human-readable summary for the interrupt card
+    denied_tools = []
+    for d in denials:
+        tool_name = d.get("tool_name", "unknown")
+        tool_input = d.get("tool_input", {})
+        denied_tools.append({
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+            "risk_level": get_risk_level(tool_name),
+        })
+
+    # Interrupt — surfaces to frontend via AG-UI, rendered by useLangGraphInterrupt
+    response = interrupt({
+        "type": "permission_request",
+        "denials": denied_tools,
+        "message": f"Claude 请求执行 {len(denied_tools)} 个被拒绝的操作",
+    })
+
+    # Parse user's response
+    approved = False
+    if isinstance(response, str):
+        try:
+            import json
+            response = json.loads(response)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if isinstance(response, dict):
+        approved = response.get("approved", False)
+
+    if approved:
+        return {
+            "retry_with_bypass": True,
+            "permission_denials": [],
+            "claude_result": "",
+        }
+    else:
+        return {"permission_denials": []}
+
+
+def _route_after_permission(state: ClaudeCodeState) -> str:
+    """Route back to execute if user approved, otherwise to collect."""
+    if state.get("retry_with_bypass"):
+        return "execute"
+    return "collect"
 
 
 async def collect_node(state: ClaudeCodeState):
@@ -293,11 +368,13 @@ def build_graph():
 
     graph.add_node("prepare", prepare_node)
     graph.add_node("execute", execute_node)
+    graph.add_node("permission_check", permission_check_node)
     graph.add_node("collect", collect_node)
 
     graph.add_edge(START, "prepare")
     graph.add_edge("prepare", "execute")
-    graph.add_edge("execute", "collect")
+    graph.add_edge("execute", "permission_check")
+    graph.add_conditional_edges("permission_check", _route_after_permission)
     graph.add_edge("collect", END)
 
     return graph.compile(checkpointer=MemorySaver())
