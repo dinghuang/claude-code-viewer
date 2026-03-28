@@ -97,9 +97,15 @@ def convert_to_process_message(msg) -> Optional[ProcessMessage]:
         )
 
     elif isinstance(msg, ResultMessage):
+        # ResultMessage.result duplicates the last AssistantMessage text,
+        # so only show metadata (cost/duration), not the text again.
+        cost_str = f"${msg.total_cost_usd:.4f}" if msg.total_cost_usd else ""
+        duration_str = f"{msg.duration_ms / 1000:.1f}s" if msg.duration_ms else ""
+        meta_parts = [p for p in [cost_str, duration_str] if p]
+        content = f"任务完成 ({', '.join(meta_parts)})" if meta_parts else "任务完成"
         return ProcessMessage(
             id=msg_id, type=ProcessMessageType.RESULT,
-            content=msg.result or "任务完成",
+            content=content,
             timestamp=ts, cost=msg.total_cost_usd,
         )
 
