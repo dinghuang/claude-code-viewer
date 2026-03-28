@@ -7,13 +7,15 @@ import { ProcessPanel } from "./components/ProcessPanel";
 import { useState } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const RUNTIME_URL = import.meta.env.VITE_COPILOTKIT_RUNTIME_URL || "http://localhost:4000";
 
 export default function App() {
   const [showPanel, setShowPanel] = useState(false);
 
   return (
     <CopilotKit
-      runtimeUrl={`${API_URL}/copilotkit`}
+      runtimeUrl={`${RUNTIME_URL}/copilotkit`}
+      agent="claude_code"
     >
       <div className="flex flex-col lg:flex-row h-screen bg-gray-100">
         {/* 移动端顶部切换栏 */}

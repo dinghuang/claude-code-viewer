@@ -5,17 +5,21 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:runtime": "tsx server/copilotkit-runtime.ts",
+    "dev:all": "npx concurrently \"npm run dev\" \"npm run dev:runtime\" --names ui,runtime --prefix-colors blue,green --kill-others",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
+    "@ag-ui/langgraph": "^0.0.25",
     "@copilotkit/react-core": "^1.54.1",
     "@copilotkit/react-ui": "^1.54.1",
     "@copilotkit/runtime": "^1.54.1",
-    "@ag-ui/langgraph": "^0.0.25",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "reflect-metadata": "^0.2.2",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.66",
