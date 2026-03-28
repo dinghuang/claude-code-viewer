@@ -2,7 +2,11 @@
 """Build ClaudeAgentOptions from app settings."""
 
 import os
+import json
+import logging
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def build_claude_options():
@@ -22,7 +26,18 @@ def build_claude_options():
         "model": settings.anthropic_model,
         "cwd": settings.working_directory,
     }
+
     if settings.claude_code_cli_path:
         opts["cli_path"] = settings.claude_code_cli_path
+
+    # Parse MCP servers from JSON string
+    if settings.claude_code_mcp_servers:
+        try:
+            mcp = json.loads(settings.claude_code_mcp_servers)
+            if isinstance(mcp, dict) and mcp:
+                opts["mcp_servers"] = mcp
+                logger.info(f"MCP servers loaded: {list(mcp.keys())}")
+        except json.JSONDecodeError as e:
+            logger.warning(f"Invalid CLAUDE_CODE_MCP_SERVERS JSON: {e}")
 
     return opts

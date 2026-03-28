@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     claude_code_cli_path: Optional[str] = None
     working_directory: str = "."
 
+    # Claude Code MCP 服务器 (JSON 字符串或空)
+    claude_code_mcp_servers: Optional[str] = None
+
     # ============ CopilotKit 配置 ============
     copilotkit_llm_api_key: Optional[str] = None
     copilotkit_llm_base_url: Optional[str] = None
