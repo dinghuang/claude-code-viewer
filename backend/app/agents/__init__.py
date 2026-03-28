@@ -1,6 +1,6 @@
 # backend/app/agents/__init__.py
-"""CopilotKit Agents."""
+"""Claude Code Agent — LangGraph graph + state."""
 
-from .claude_code_agent import ClaudeCodeAgent
+from .claude_code_agent import build_graph, ClaudeCodeState
 
-__all__ = ["ClaudeCodeAgent"]
+__all__ = ["build_graph", "ClaudeCodeState"]

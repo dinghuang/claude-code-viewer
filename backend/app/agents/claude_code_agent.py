@@ -1,255 +1,246 @@
 # backend/app/agents/claude_code_agent.py
-"""CopilotKit Agent that bridges to Claude SDK."""
+"""Claude Code Agent — LangGraph nodes + graph builder."""
 
 import uuid
 import time
-import asyncio
-from typing import Optional, Dict, Any, List
+import logging
+from typing import Optional, Dict, Any, Annotated
 
-from copilotkit import Agent
-from copilotkit.types import Message
-from copilotkit.action import ActionDict
-from app.sdk.client import create_claude_client
-from app.models import ProcessMessage, ProcessMessageType
+from langgraph.graph import StateGraph, START, END, MessagesState
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import interrupt, Command
+from langchain_core.messages import AIMessage, SystemMessage
+
+from claude_agent_sdk import (
+    query,
+    ClaudeAgentOptions,
+    PermissionResultAllow,
+    PermissionResultDeny,
+    ResultMessage,
+    AssistantMessage,
+    ThinkingBlock,
+    ToolUseBlock,
+    ToolResultBlock,
+    TextBlock,
+)
+
 from app.config import get_settings
+from app.models import ProcessMessage, ProcessMessageType
 from app.api.process_stream import broadcast_to_subscribers
+from app.sdk.client import build_claude_options
+
+logger = logging.getLogger(__name__)
 
 
-class ClaudeCodeAgent(Agent):
-    """CopilotKit Agent 桥接 Claude SDK"""
+# ============ State ============
 
-    def __init__(
-        self,
-        name: str = "claude_code",
-        description: str = "Claude Code 助手 - 执行代码任务",
-        working_dir: Optional[str] = None,
-    ):
-        super().__init__(name=name, description=description)
-        self.working_dir = working_dir or get_settings().working_directory
-        self._system_prompt_loaded = False
-        self._permission_futures: Dict[str, asyncio.Future] = {}
+class ClaudeCodeState(MessagesState):
+    system_prompt_loaded: bool
+    claude_result: str
+    claude_cost: float
+    claude_duration_ms: int
+    pending_permission: Optional[Dict[str, Any]]
+    permission_response: Optional[Dict[str, Any]]
+    error: str
 
-    def execute(
-        self,
-        *,
-        state: dict,
-        config: Optional[dict] = None,
-        messages: List[Message],
-        thread_id: str,
-        actions: Optional[List[ActionDict]] = None,
-        node_name: Optional[str] = None,
-        meta_events: Optional[List] = None,
-        **kwargs,
-    ):
-        """执行 Agent - 由 CopilotKit 调用
 
-        This method yields events in the format expected by CopilotKit.
-        """
-        user_message = messages[-1].get("content", "") if messages else ""
-        settings = get_settings()
+# ============ Risk levels ============
 
-        # 首次对话时，加载系统提示词
-        if not self._system_prompt_loaded:
-            system_prompt = settings.get_system_prompt()
-            if system_prompt:
-                # 发送系统提示词作为思维过程
-                asyncio.create_task(self._broadcast_system_prompt(system_prompt))
-            self._system_prompt_loaded = True
+HIGH_RISK = {"Bash", "Write", "Edit", "delete_file", "rm", "sudo"}
+MEDIUM_RISK = {"git", "npm", "pip", "mkdir", "mv"}
 
-        # 发送用户消息到思维过程
-        asyncio.create_task(self._broadcast_user_message(user_message))
 
-        # 执行 Claude Code 并 yield 事件
-        return self._execute_async(user_message, thread_id)
+def get_risk_level(tool_name: str) -> str:
+    tool_lower = tool_name.lower()
+    if tool_name in HIGH_RISK or any(h.lower() in tool_lower for h in HIGH_RISK):
+        return "high"
+    if tool_name in MEDIUM_RISK or any(m.lower() in tool_lower for m in MEDIUM_RISK):
+        return "medium"
+    return "low"
 
-    async def _execute_async(self, user_message: str, thread_id: str):
-        """异步执行并 yield 事件"""
-        # 创建客户端
-        client = create_claude_client(
-            working_dir=self.working_dir,
-            can_use_tool=self._handle_permission,
-        )
 
-        try:
-            async for msg in client.query(user_message):
-                # 广播思维过程
-                process_msg = self._convert_to_process_message(msg)
-                if process_msg:
-                    await broadcast_to_subscribers(process_msg)
+# ============ Message converter ============
 
-                # 如果是最终结果，返回给 CopilotKit
-                if hasattr(msg, 'result') and msg.result:
-                    yield self._make_event(
-                        type="result",
-                        content=msg.result,
-                        metadata={
-                            "cost": getattr(msg, 'total_cost_usd', None),
-                            "duration_ms": getattr(msg, 'duration_ms', None),
-                        }
-                    )
+def convert_to_process_message(msg) -> Optional[ProcessMessage]:
+    msg_id = str(uuid.uuid4())
+    ts = int(time.time() * 1000)
 
-        except Exception as e:
-            await broadcast_to_subscribers(ProcessMessage(
-                id=str(uuid.uuid4()),
-                type=ProcessMessageType.ERROR,
-                content=f"错误: {str(e)}",
-                timestamp=int(time.time() * 1000),
-            ))
-            yield self._make_event(
-                type="error",
-                content=f"执行出错: {str(e)}"
+    if isinstance(msg, AssistantMessage):
+        texts = []
+        for block in msg.content:
+            if isinstance(block, TextBlock):
+                texts.append(block.text)
+        if texts:
+            return ProcessMessage(
+                id=msg_id, type=ProcessMessageType.TEXT,
+                content="\n".join(texts)[:500], timestamp=ts,
             )
 
-    def _make_event(self, type: str, content: str, **kwargs) -> str:
-        """创建 CopilotKit 事件格式"""
-        import json
-        event = {"type": type, "content": content, **kwargs}
-        return json.dumps(event) + "\n"
+    elif isinstance(msg, ThinkingBlock):
+        return ProcessMessage(
+            id=msg_id, type=ProcessMessageType.THINKING,
+            content=msg.thinking[:500], timestamp=ts,
+        )
 
-    async def _broadcast_system_prompt(self, prompt: str):
-        """广播系统提示词"""
+    elif isinstance(msg, ToolUseBlock):
+        return ProcessMessage(
+            id=msg_id, type=ProcessMessageType.TOOL_USE,
+            content=f"调用工具: {msg.name}",
+            timestamp=ts, tool_name=msg.name, tool_input=msg.input,
+        )
+
+    elif isinstance(msg, ToolResultBlock):
+        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+        return ProcessMessage(
+            id=msg_id, type=ProcessMessageType.TOOL_RESULT,
+            content=content[:500], timestamp=ts, tool_result=msg.content,
+        )
+
+    elif isinstance(msg, ResultMessage):
+        return ProcessMessage(
+            id=msg_id, type=ProcessMessageType.RESULT,
+            content=msg.result or "任务完成",
+            timestamp=ts, cost=msg.total_cost_usd,
+        )
+
+    return None
+
+
+# ============ Nodes ============
+
+async def prepare_node(state: ClaudeCodeState):
+    """Load system prompt on first conversation."""
+    if state.get("system_prompt_loaded"):
+        return {}
+
+    settings = get_settings()
+    system_prompt = settings.get_system_prompt()
+    if system_prompt:
         await broadcast_to_subscribers(ProcessMessage(
             id=str(uuid.uuid4()),
             type=ProcessMessageType.TEXT,
-            content=f"[系统提示词已加载]\n{prompt[:200]}...",
+            content=f"[系统提示词已加载] ({len(system_prompt)} 字符)",
             timestamp=int(time.time() * 1000),
         ))
 
-    async def _broadcast_user_message(self, message: str):
-        """广播用户消息"""
-        await broadcast_to_subscribers(ProcessMessage(
-            id=str(uuid.uuid4()),
-            type=ProcessMessageType.TEXT,
-            content=f"用户: {message}",
-            timestamp=int(time.time() * 1000),
-        ))
+    return {"system_prompt_loaded": True}
 
-    async def _handle_permission(
-        self,
-        tool_name: str,
-        tool_input: Dict[str, Any],
-        context: Any
-    ):
-        """处理权限请求"""
+
+async def execute_node(state: ClaudeCodeState):
+    """Call claude_agent_sdk.query() and stream messages to SSE."""
+    user_message = ""
+    for msg in reversed(state.get("messages", [])):
+        if hasattr(msg, "content") and (not hasattr(msg, "type") or msg.type == "human"):
+            user_message = msg.content if isinstance(msg.content, str) else str(msg.content)
+            break
+
+    if not user_message:
+        return {"error": "No user message found"}
+
+    settings = get_settings()
+
+    # Permission handler using LangGraph interrupt
+    async def handle_permission(tool_name, tool_input, context):
+        risk = get_risk_level(tool_name)
+
+        # Auto-approve low-risk
+        if risk == "low":
+            return PermissionResultAllow()
+
+        # Broadcast permission request to ProcessPanel
         request_id = str(uuid.uuid4())
-        risk_level = self._get_risk_level(tool_name)
-
-        # 广播权限请求到前端
-        permission_msg = ProcessMessage(
+        await broadcast_to_subscribers(ProcessMessage(
             id=request_id,
             type=ProcessMessageType.PERMISSION,
             content=f"请求执行工具: {tool_name}",
             timestamp=int(time.time() * 1000),
             tool_name=tool_name,
             tool_input=tool_input,
-            risk_level=risk_level,
-        )
-        await broadcast_to_subscribers(permission_msg)
+            risk_level=risk,
+        ))
 
-        # 低风险操作自动批准
-        if risk_level == "low":
-            return {"allowed": True, "reason": "低风险操作自动批准"}
+        # Interrupt graph — value is sent to frontend via AG-UI state snapshot
+        response = interrupt({
+            "request_id": request_id,
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+            "risk_level": risk,
+            "description": f"Claude 请求执行 {tool_name}",
+        })
 
-        # 中高风险需要用户确认
-        future = asyncio.Future()
-        self._permission_futures[request_id] = future
+        # When graph resumes, response contains user's decision
+        if isinstance(response, dict) and response.get("approved"):
+            return PermissionResultAllow()
+        else:
+            reason = response.get("reason", "用户拒绝") if isinstance(response, dict) else "用户拒绝"
+            return PermissionResultDeny(message=reason)
 
-        try:
-            result = await asyncio.wait_for(future, timeout=60.0)
-            return result
-        except asyncio.TimeoutError:
-            return {"allowed": False, "reason": "等待用户确认超时"}
-        finally:
-            self._permission_futures.pop(request_id, None)
+    # Build options
+    base_opts = build_claude_options()
+    system_prompt = settings.get_system_prompt() if not state.get("system_prompt_loaded") else None
 
-    def resolve_permission(self, request_id: str, approved: bool):
-        """解决权限请求 (由 CopilotKit Action 调用)"""
-        future = self._permission_futures.get(request_id)
-        if future and not future.done():
-            future.set_result({
-                "allowed": approved,
-                "reason": "用户确认" if approved else "用户拒绝"
-            })
+    options = ClaudeAgentOptions(
+        **base_opts,
+        can_use_tool=handle_permission,
+        **({"system_prompt": system_prompt} if system_prompt else {}),
+    )
 
-    async def get_state(self, *, thread_id: str):
-        """获取 Agent 状态"""
-        return {
-            "threadId": thread_id,
-            "threadExists": False,
-            "state": {},
-            "messages": []
-        }
+    result_text = ""
+    cost = 0.0
+    duration = 0
 
-    def _get_risk_level(self, tool_name: str) -> str:
-        """根据工具名判断风险等级"""
-        HIGH_RISK = {"Bash", "Write", "Edit", "delete_file", "rm", "sudo"}
-        MEDIUM_RISK = {"git", "npm", "pip", "mkdir", "mv"}
+    try:
+        async for msg in query(prompt=user_message, options=options):
+            process_msg = convert_to_process_message(msg)
+            if process_msg:
+                await broadcast_to_subscribers(process_msg)
 
-        tool_lower = tool_name.lower()
-        if tool_name in HIGH_RISK or any(h.lower() in tool_lower for h in HIGH_RISK):
-            return "high"
-        elif tool_name in MEDIUM_RISK or any(m.lower() in tool_lower for m in MEDIUM_RISK):
-            return "medium"
-        return "low"
+            if isinstance(msg, ResultMessage):
+                result_text = msg.result or "任务完成"
+                cost = msg.total_cost_usd or 0.0
+                duration = msg.duration_ms or 0
 
-    def _convert_to_process_message(self, msg) -> Optional[ProcessMessage]:
-        """将 Claude SDK 消息转换为 ProcessMessage"""
-        msg_id = str(uuid.uuid4())
-        timestamp = int(time.time() * 1000)
+    except Exception as e:
+        logger.error(f"Claude SDK error: {e}")
+        await broadcast_to_subscribers(ProcessMessage(
+            id=str(uuid.uuid4()),
+            type=ProcessMessageType.ERROR,
+            content=f"执行错误: {str(e)}",
+            timestamp=int(time.time() * 1000),
+        ))
+        return {"error": str(e), "claude_result": f"执行出错: {str(e)}"}
 
-        msg_type = type(msg).__name__
+    return {
+        "claude_result": result_text,
+        "claude_cost": cost,
+        "claude_duration_ms": duration,
+        "system_prompt_loaded": True,
+    }
 
-        if msg_type == "AssistantMessage":
-            content = ""
-            if hasattr(msg, 'content'):
-                if isinstance(msg.content, str):
-                    content = msg.content
-                elif isinstance(msg.content, list):
-                    for block in msg.content:
-                        if hasattr(block, 'text'):
-                            content += block.text
-            return ProcessMessage(
-                id=msg_id,
-                type=ProcessMessageType.TEXT,
-                content=content[:500] if content else "",
-                timestamp=timestamp,
-            )
 
-        elif msg_type == "ToolUseBlock":
-            return ProcessMessage(
-                id=msg_id,
-                type=ProcessMessageType.TOOL_USE,
-                content=f"调用工具: {getattr(msg, 'name', 'unknown')}",
-                timestamp=timestamp,
-                tool_name=getattr(msg, 'name', None),
-                tool_input=getattr(msg, 'input', None),
-            )
+async def collect_node(state: ClaudeCodeState):
+    """Package Claude result as AIMessage for CopilotKit."""
+    result = state.get("claude_result", "")
+    error = state.get("error", "")
 
-        elif msg_type == "ToolResultBlock":
-            content = getattr(msg, 'content', '')
-            return ProcessMessage(
-                id=msg_id,
-                type=ProcessMessageType.TOOL_RESULT,
-                content=str(content)[:500] if content else "",
-                timestamp=timestamp,
-                tool_result=content,
-            )
+    content = result if result else (error if error else "任务完成")
 
-        elif msg_type == "ResultMessage":
-            return ProcessMessage(
-                id=msg_id,
-                type=ProcessMessageType.RESULT,
-                content=getattr(msg, 'result', '任务完成') or "任务完成",
-                timestamp=timestamp,
-                cost=getattr(msg, 'total_cost_usd', None),
-            )
+    return {"messages": [AIMessage(content=content)]}
 
-        elif msg_type == "ThinkingBlock":
-            return ProcessMessage(
-                id=msg_id,
-                type=ProcessMessageType.THINKING,
-                content=getattr(msg, 'thinking', '') or "",
-                timestamp=timestamp,
-            )
 
-        return None
+# ============ Graph builder ============
+
+def build_graph():
+    """Build and compile the Claude Code LangGraph."""
+    graph = StateGraph(ClaudeCodeState)
+
+    graph.add_node("prepare", prepare_node)
+    graph.add_node("execute", execute_node)
+    graph.add_node("collect", collect_node)
+
+    graph.add_edge(START, "prepare")
+    graph.add_edge("prepare", "execute")
+    graph.add_edge("execute", "collect")
+    graph.add_edge("collect", END)
+
+    return graph.compile(checkpointer=MemorySaver())
