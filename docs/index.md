@@ -18,7 +18,7 @@
 |------|------|------|
 | [后端设计](backend.md) | Python FastAPI + LangGraph + AG-UI 端点 | `docs/backend.md` |
 | [Runtime 中间层](runtime.md) | Node.js CopilotKit Runtime 协议转换 | `docs/runtime.md` |
-| [前端设计](frontend.md) | React + CopilotKit + Tailwind CSS 组件 | `docs/frontend.md` |
+| [前端设计](frontend.md) | UI 设计系统、卡片渲染、权限卡片、设置浮窗 | `docs/frontend.md` |
 
 ### 集成指南
 
@@ -93,6 +93,9 @@ Single-Route        协议转换              AG-UI SSE
 
 - **Claude Code CLI 集成**: 后端通过 `claude_agent_sdk.query()` 调用真实 Claude Code CLI
 - **实时思维过程**: SSE 广播 Claude 的思考、工具调用、结果到右侧面板
-- **系统提示词编辑器**: 左下角浮窗可在线编辑系统提示词，通过 REST API 同步后端
-- **24 小时实时时钟**: 手机框架状态栏显示实时时间
+- **Markdown 卡片化**: 表格渲染为圆角卡片 (斑马纹 + hover)，代码块/引用块也有卡片样式
+- **权限交互卡片**: 默认模式下工具被拒时，CopilotChat 中显示 PermissionCard（LangGraph interrupt），用户可"允许并重试"
+- **设置浮窗**: 左下角齿轮按钮打开 Modal，可配置权限模式 (4 种) 和系统提示词
+- **Indigo 主题**: 用户消息蓝紫渐变气泡、Indigo 聚焦光晕、柔和配色
+- **24 小时实时时钟**: 手机框架状态栏
 - **响应式布局**: 左侧手机固定宽度，右侧面板自适应填满

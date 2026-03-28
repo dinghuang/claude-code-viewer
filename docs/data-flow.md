@@ -150,34 +150,81 @@ class ProcessMessageType(str, Enum):
 
 ## 权限处理流程
 
+### LangGraph 图结构
+
 ```
-Claude SDK     LangGraph Node     Runtime     Frontend      User
-    │                │                │           │           │
-    │  ToolUseBlock  │                │           │           │
-    │───────────────>│                │           │           │
-    │                │  broadcast     │           │           │
-    │                │  permission    │           │           │
-    │                │  to SSE ───────────────────>│           │
-    │                │                │           │ Show Card │
-    │                │                │           │──────────>│
-    │                │                │           │           │
-    │                │                │           │  Approve  │
-    │                │                │           │<──────────│
-    │                │                │           │           │
-    │                │  response via  │           │           │
-    │                │  CopilotKit ──>│           │           │
-    │                │                │           │           │
-    │  Continue      │                │           │           │
-    │<───────────────│                │           │           │
+START → prepare → execute → permission_check → collect → END
+                     ↑              │
+                     └──────────────┘  (用户点"允许并重试"时，以 bypassPermissions 重跑 execute)
+```
+
+### 权限交互时序图
+
+```
+Claude CLI    execute_node    permission_check    Runtime    CopilotChat    User
+    │              │                │                │           │           │
+    │ ToolUseBlock │                │                │           │           │
+    │─────────────>│                │                │           │           │
+    │              │                │                │           │           │
+    │ CLI 拒绝     │                │                │           │           │
+    │ (no perm)    │                │                │           │           │
+    │─────────────>│                │                │           │           │
+    │              │  SSE broadcast │                │           │           │
+    │              │  "权限拒绝"  ──────────────────────────────>│ ProcessPanel│
+    │              │                │                │           │           │
+    │ ResultMessage│                │                │           │           │
+    │ (denials:[]) │                │                │           │           │
+    │─────────────>│                │                │           │           │
+    │              │  denials 写入   │                │           │           │
+    │              │  state ────────>│                │           │           │
+    │              │                │                │           │           │
+    │              │                │  interrupt()   │           │           │
+    │              │                │───────────────>│           │           │
+    │              │                │                │  AG-UI    │           │
+    │              │                │                │──────────>│           │
+    │              │                │                │           │           │
+    │              │                │                │  Permission Card     │
+    │              │                │                │  ┌──────────────┐    │
+    │              │                │                │  │ ⚠️ Write     │───>│
+    │              │                │                │  │ [跳过][允许] │    │
+    │              │                │                │  └──────────────┘    │
+    │              │                │                │           │           │
+    │              │                │                │           │  点击     │
+    │              │                │                │           │ "允许并   │
+    │              │                │                │           │  重试"    │
+    │              │                │                │           │<──────────│
+    │              │                │                │           │           │
+    │              │                │  resolve()     │           │           │
+    │              │                │<───────────────│<──────────│           │
+    │              │                │                │           │           │
+    │              │                │ retry=true     │           │           │
+    │              │                │───────────────>│           │           │
+    │              │                │                │           │           │
+    │              │  重新执行       │                │           │           │
+    │              │  (bypass mode) │                │           │           │
+    │<─────────────│                │                │           │           │
+    │              │                │                │           │           │
+    │ 执行成功     │                │                │           │           │
+    │─────────────>│                │                │           │           │
+    │              │────────────────────────────────────────────>│           │
+    │              │                │                │  最终回复  │           │
 ```
 
 ### 权限风险等级
 
 | 等级 | 工具 | UI 表现 |
 |------|------|---------|
-| 高风险 | Bash, Write, Edit, delete | 红色卡片，需明确确认 |
-| 中风险 | git, npm, pip | 黄色卡片，需确认 |
-| 低风险 | Read, Glob, Grep, search | 绿色卡片，自动批准 |
+| 高风险 | Bash, Write, Edit, delete, rm, sudo | 红色标签，需明确确认 |
+| 中风险 | git, npm, pip, mkdir, mv | 黄色标签，需确认 |
+| 低风险 | Read, Glob, Grep, search | 绿色标签，默认模式下自动批准 |
+
+### 权限卡片设计
+
+在 CopilotChat 聊天流中渲染为交互式卡片 (`useLangGraphInterrupt`)：
+
+- 橙色渐变头部显示 "Claude 请求执行 N 个被拒绝的操作"
+- 每个被拒工具显示为子卡片：风险等级标签 + 工具名 + 参数预览
+- 底部两个按钮："跳过"（proceed to collect）/ "允许并重试"（re-execute with bypass）
 
 ## 错误处理
 
