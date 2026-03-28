@@ -295,7 +295,8 @@ async def execute_node(state: ClaudeCodeState):
                 denials = msg.permission_denials or []
 
     except Exception as e:
-        logger.error(f"Claude SDK error: {e}")
+        import traceback
+        logger.error(f"Claude SDK error: {e}\n{traceback.format_exc()}")
         await broadcast_to_subscribers(ProcessMessage(
             id=str(uuid.uuid4()),
             type=ProcessMessageType.ERROR,
