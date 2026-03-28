@@ -1,15 +1,16 @@
 # backend/app/main.py
 """FastAPI entry point — AG-UI endpoint with Claude Code LangGraph Agent."""
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
 import warnings
 
 from app.config import get_settings
 from app.api import process_stream
-from app.agents.claude_code_agent import build_graph
+from app.agents.claude_code_agent import build_graph, set_system_prompt, get_effective_system_prompt
 from ag_ui_langgraph import LangGraphAgent, add_langgraph_fastapi_endpoint
 
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
@@ -72,3 +73,20 @@ add_langgraph_fastapi_endpoint(app, agent, path="/")
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/system-prompt")
+async def get_system_prompt():
+    """Get current system prompt."""
+    prompt = get_effective_system_prompt()
+    return {"prompt": prompt or ""}
+
+
+@app.post("/api/system-prompt")
+async def update_system_prompt(request: Request):
+    """Update system prompt from frontend."""
+    body = await request.json()
+    prompt = body.get("prompt", "")
+    set_system_prompt(prompt)
+    logger.info(f"系统提示词已更新 ({len(prompt)} 字符)")
+    return {"status": "ok", "length": len(prompt)}

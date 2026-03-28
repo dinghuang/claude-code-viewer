@@ -106,6 +106,24 @@ def convert_to_process_message(msg) -> Optional[ProcessMessage]:
     return None
 
 
+# ============ In-memory system prompt store ============
+
+_system_prompt_override: Optional[str] = None
+
+
+def set_system_prompt(prompt: str):
+    """Set system prompt from frontend."""
+    global _system_prompt_override
+    _system_prompt_override = prompt
+
+
+def get_effective_system_prompt() -> Optional[str]:
+    """Get system prompt: frontend override > file-based fallback."""
+    if _system_prompt_override is not None:
+        return _system_prompt_override
+    return get_settings().get_system_prompt()
+
+
 # ============ Nodes ============
 
 async def prepare_node(state: ClaudeCodeState):
@@ -113,8 +131,7 @@ async def prepare_node(state: ClaudeCodeState):
     if state.get("system_prompt_loaded"):
         return {}
 
-    settings = get_settings()
-    system_prompt = settings.get_system_prompt()
+    system_prompt = get_effective_system_prompt()
     if system_prompt:
         await broadcast_to_subscribers(ProcessMessage(
             id=str(uuid.uuid4()),
@@ -143,7 +160,7 @@ async def execute_node(state: ClaudeCodeState):
     # CopilotKit Action + interrupt() will be added once the streaming prompt
     # issue with can_use_tool is resolved upstream in claude-agent-sdk.
     base_opts = build_claude_options()
-    system_prompt = settings.get_system_prompt() if not state.get("system_prompt_loaded") else None
+    system_prompt = get_effective_system_prompt() if not state.get("system_prompt_loaded") else None
 
     options = ClaudeAgentOptions(
         **base_opts,

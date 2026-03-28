@@ -4,18 +4,33 @@ import { CopilotChat } from "@copilotkit/react-ui";
 import "@copilotkit/react-ui/styles.css";
 import { PhoneFrame } from "./components/PhoneFrame";
 import { ProcessPanel } from "./components/ProcessPanel";
-import { useState } from "react";
+import { SystemPromptPanel, DEFAULT_PROMPT } from "./components/SystemPromptPanel";
+import { useState, useEffect } from "react";
 
 const RUNTIME_URL = (import.meta as any).env?.VITE_COPILOTKIT_RUNTIME_URL || "http://localhost:4000";
+const API_URL = (import.meta as any).env?.VITE_API_URL || "http://localhost:8000";
 
 export default function App() {
   const [showPanel, setShowPanel] = useState(false);
+  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_PROMPT);
+
+  // Sync default prompt to backend on mount
+  useEffect(() => {
+    fetch(`${API_URL}/api/system-prompt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: systemPrompt }),
+    }).catch(() => {});
+  }, []);
 
   return (
     <CopilotKit
       runtimeUrl={`${RUNTIME_URL}/copilotkit`}
       agent="claude_code"
     >
+      {/* System prompt editor floating panel */}
+      <SystemPromptPanel value={systemPrompt} onChange={setSystemPrompt} />
+
       <div className="flex flex-col lg:flex-row h-screen bg-gray-100">
         {/* 移动端顶部切换栏 */}
         <div className="lg:hidden flex bg-white border-b border-gray-200">
