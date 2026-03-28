@@ -3,99 +3,106 @@
 ## 系统分层架构
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│                         用户界面层                              │
-│  ┌─────────────────────┐   ┌───────────────────────────────┐  │
-│  │   PhoneFrame        │   │   ProcessPanel                │  │
-│  │   ┌───────────────┐ │   │   (展示完整思维过程)           │  │
-│  │   │ CopilotKit    │ │   │   - AssistantMessage          │  │
-│  │   │ - Chat        │ │   │   - ToolUseBlock              │  │
-│  │   │ - Permission  │ │   │   - ToolResultBlock           │  │
-│  │   │ - Selection   │ │   │   - ThinkingBlock             │  │
-│  │   │ - Progress    │ │   │   - ResultMessage             │  │
-│  │   └───────────────┘ │   │                               │  │
-│  └─────────────────────┘   └───────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                          用户界面层 (Frontend)                        │
+│  ┌─────────────────────┐   ┌──────────────────────────────────────┐ │
+│  │   PhoneFrame        │   │   ProcessPanel                       │ │
+│  │   ┌───────────────┐ │   │   (展示完整思维过程 - SSE 流)         │ │
+│  │   │ CopilotKit    │ │   │   - ThinkingBlock                   │ │
+│  │   │ - CopilotChat │ │   │   - ToolUseBlock                    │ │
+│  │   │ - Permission  │ │   │   - ToolResultBlock                 │ │
+│  │   │ - Selection   │ │   │   - ResultMessage                   │ │
+│  │   └───────────────┘ │   │                                     │ │
+│  └─────────────────────┘   └──────────────────────────────────────┘ │
+│  React 18 + Vite + Tailwind CSS + CopilotKit v1.54.1               │
+│  Port: 3000                                                         │
+└──────────────────────────────────────────────────────────────────────┘
                               │
+                              │ Single-Route JSON-RPC Protocol
                               ▼
-┌────────────────────────────────────────────────────────────────┐
-│                       通信协议层                                │
-│         CopilotKit AG-UI Protocol (SSE + Events)               │
-└────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                    CopilotKit Runtime 中间层                          │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │  Node.js CopilotKit Runtime Server                             │ │
+│  │  ├── CopilotRuntime + ExperimentalEmptyAdapter                │ │
+│  │  ├── LangGraphHttpAgent → 转发到 Python 后端                   │ │
+│  │  └── copilotRuntimeNodeHttpEndpoint                           │ │
+│  │                                                                │ │
+│  │  协议转换: Single-Route (前端) ←→ AG-UI SSE (后端)             │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+│  @copilotkit/runtime v1.54.1 + tsx                                  │
+│  Port: 4000                                                         │
+└──────────────────────────────────────────────────────────────────────┘
                               │
+                              │ AG-UI Protocol (SSE Events)
                               ▼
-┌────────────────────────────────────────────────────────────────┐
-│                       后端服务层                                │
-│  ┌─────────────────────────────────────────────────────────┐  │
-│  │  FastAPI App                                             │  │
-│  │  └── CopilotKitRemoteEndpoint                           │  │
-│  │       └── ClaudeCodeAgent (CopilotKit Agent)            │  │
-│  │            ├── 首次对话加载系统提示词                    │  │
-│  │            ├── 消息转发到 Claude SDK                     │  │
-│  │            ├── 权限请求 → CopilotKit Action              │  │
-│  │            └── 思维过程 → 前端 ProcessPanel              │  │
-│  └─────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────┐
-│                       Claude SDK 层                            │
-│  ┌─────────────────────────────────────────────────────────┐  │
-│  │  ClaudeSDKClient (claude-agent-sdk-python)              │  │
-│  │  - connect() → 启动 Claude Code CLI                     │  │
-│  │  - query() → 发送用户消息                               │  │
-│  │  - receive_messages() → 接收 Claude 响应流              │  │
-│  │  - can_use_tool callback → 权限请求回调                 │  │
-│  └─────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────┐
-│                    Claude Code CLI (本地)                      │
-│            内置 MCP 服务和 Skills 配置                         │
-└────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                       后端服务层 (Python)                              │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │  FastAPI App                                                   │ │
+│  │  ├── AG-UI Endpoint (POST /)                                  │ │
+│  │  │   └── LangGraphAgent (ag-ui-langgraph)                     │ │
+│  │  │       └── LangGraph StateGraph → chat_node                 │ │
+│  │  ├── SSE Endpoint (GET /api/process-stream)                   │ │
+│  │  │   └── 思维过程广播                                          │ │
+│  │  └── Health Endpoint (GET /health)                            │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+│  Python 3.12 + FastAPI + copilotkit 0.1.83 + ag-ui-langgraph       │
+│  Port: 8000                                                         │
+└──────────────────────────────────────────────────────────────────────┘
 ```
+
+## 三服务架构
+
+本项目采用三服务架构，每个服务承担独立职责：
+
+| 服务 | 技术栈 | 端口 | 职责 |
+|------|--------|------|------|
+| **Frontend** | React + Vite + CopilotKit | 3000 | 用户界面、聊天交互、思维过程展示 |
+| **Runtime** | Node.js + @copilotkit/runtime | 4000 | 协议转换中间件 (Single-Route ↔ AG-UI) |
+| **Backend** | Python + FastAPI + LangGraph | 8000 | Agent 执行、LangGraph 编排、SSE 广播 |
+
+### 为什么需要 Runtime 中间层？
+
+CopilotKit v1.54.1 的前端和后端使用不同的通信协议：
+
+- **前端** (`@copilotkit/react-core`) 使用 **Single-Route JSON-RPC** 协议
+- **后端** (`ag-ui-langgraph`) 使用 **AG-UI SSE** 协议
+
+Node.js CopilotKit Runtime 作为中间层负责协议转换，使前后端可以独立演化。
 
 ## 关键设计决策
 
-### 1. CopilotKit 作为主通信通道
+### 1. AG-UI 协议 (Agent-User Interaction)
 
-用户输入、权限确认、选择都通过 CopilotKit AG-UI 协议传输。
+使用 CopilotKit 的 AG-UI 开源协议作为 Agent 通信标准。
 
 **原因：**
-- CopilotKit 提供完整的 UI 组件和交互协议
-- 支持 SSE 实时通信
-- 内置 Action 机制处理用户交互
+- 轻量级、基于事件的协议
+- 支持实时 SSE 流式通信
+- 前后端解耦，支持多语言后端
 
-### 2. 思维过程广播
+### 2. LangGraph 作为 Agent 编排框架
 
-Claude SDK 的所有消息通过独立 SSE 通道广播到前端 ProcessPanel。
+后端使用 LangGraph StateGraph 定义 Agent 逻辑。
+
+**原因：**
+- 与 CopilotKit AG-UI 原生集成
+- 支持有状态的多轮对话
+- 内置 checkpointer 支持对话恢复
+
+### 3. 思维过程独立 SSE 通道
+
+Claude SDK 消息通过独立 SSE 通道 (`/api/process-stream`) 广播到前端 ProcessPanel。
 
 **原因：**
 - 分离关注点：交互走 CopilotKit，展示走 ProcessPanel
 - 不阻塞主交互流程
 - 支持多个前端客户端同时订阅
 
-### 3. 权限桥接
-
-Claude SDK 的 `can_use_tool` 回调触发 CopilotKit 的 Action。
-
-**流程：**
-1. Claude SDK 检测到需要权限的工具调用
-2. 触发 `can_use_tool` 回调
-3. Agent 通过 CopilotKit Action 请求前端
-4. 前端显示 PermissionCard
-5. 用户响应后返回结果给 Claude SDK
-
 ### 4. 系统提示词预加载
 
 首次对话前，自动加载可配置的系统提示词到 Claude Code。
-
-**流程：**
-1. 用户发送第一条消息
-2. Agent 检查是否已加载系统提示词
-3. 如果未加载，先发送 `system_prompt.md` 内容给 Claude
-4. 然后再转发用户消息
 
 **配置方式：**
 ```bash
@@ -103,71 +110,78 @@ Claude SDK 的 `can_use_tool` 回调触发 CopilotKit 的 Action。
 SYSTEM_PROMPT_PATH=./system_prompt.md
 ```
 
-### 5. Claude Code CLI 内置能力
-
-Claude Code CLI 已内置 MCP 服务和 Skills 配置，无需在应用层额外配置。
-
 ## 技术选型
 
-| 组件 | 技术选择 | 原因 |
-|------|----------|------|
-| 前端框架 | React 18 | 生态成熟，CopilotKit 支持 |
-| 前端构建 | Vite | 快速 HMR，ESM 原生支持 |
-| CSS 框架 | Tailwind CSS | 快速开发，响应式设计 |
-| 前端交互 | CopilotKit | 丰富的 AI 聊天组件 |
-| 后端框架 | FastAPI | 异步支持，自动 API 文档 |
-| Claude SDK | claude-agent-sdk-python | 官方 Python SDK |
-| CopilotKit SDK | copilotkit | 官方 Python SDK |
-| 通信协议 | SSE | 单向实时通信，简单可靠 |
+| 组件 | 技术选择 | 版本 | 原因 |
+|------|----------|------|------|
+| 前端框架 | React | 18 | CopilotKit 支持 |
+| 前端构建 | Vite | 7.x | 快速 HMR |
+| CSS 框架 | Tailwind CSS | 3.4 | 快速开发 |
+| 前端交互 | CopilotKit | 1.54.1 | AI 聊天组件 |
+| Runtime | @copilotkit/runtime | 1.54.1 | 协议转换中间件 |
+| 后端框架 | FastAPI | 0.135+ | 异步，自动 API 文档 |
+| Agent 编排 | LangGraph | 1.0+ | 状态图 Agent |
+| AG-UI 集成 | ag-ui-langgraph | 0.0.28 | LangGraph AG-UI 端点 |
+| CopilotKit SDK | copilotkit | 0.1.83 | LangGraphAGUIAgent |
+| Claude SDK | claude-agent-sdk | 0.1.51 | Claude Code CLI 集成 |
+| Python 版本 | Python | 3.12 | CopilotKit SDK 要求 <3.13 |
+| 通信协议 | SSE | - | 实时单向通信 |
 
 ## 项目结构
 
 ```
 claude-code-viewer/
 ├── README.md
-├── CLAUDE.md
-├── docker-compose.yml
+├── .claude/
+│   └── CLAUDE.md
 │
-├── backend/
+├── backend/                          # Python 后端 (Port 8000)
 │   ├── app/
 │   │   ├── __init__.py
-│   │   ├── main.py
-│   │   ├── config.py
-│   │   ├── models.py
-│   │   ├── agents/
+│   │   ├── main.py                   # FastAPI 入口 + AG-UI 端点
+│   │   ├── config.py                 # Pydantic Settings 配置
+│   │   ├── models.py                 # ProcessMessage 数据模型
+│   │   ├── agents/                   # Agent 定义 (预留)
 │   │   │   └── claude_code_agent.py
-│   │   ├── sdk/
+│   │   ├── sdk/                      # Claude SDK 封装 (预留)
 │   │   │   └── client.py
-│   │   ├── actions/
-│   │   │   ├── permission_action.py
-│   │   │   └── selection_action.py
 │   │   └── api/
-│   │       └── process_stream.py
-│   ├── system_prompt.md            # 系统提示词配置
+│   │       └── process_stream.py     # SSE 思维过程端点
+│   ├── system_prompt.md
 │   ├── requirements.txt
-│   └── .env
+│   ├── .env.example
+│   └── venv/                         # Python 3.12 虚拟环境
 │
-├── frontend/
+├── frontend/                         # React 前端 (Port 3000)
+│   ├── server/
+│   │   └── copilotkit-runtime.ts     # CopilotKit Runtime 服务 (Port 4000)
 │   ├── src/
 │   │   ├── main.tsx
-│   │   ├── App.tsx
+│   │   ├── App.tsx                   # CopilotKit Provider + 布局
 │   │   ├── components/
-│   │   │   ├── layout/
-│   │   │   ├── chat/
-│   │   │   ├── interaction/
-│   │   │   └── process/
+│   │   │   ├── PhoneFrame.tsx
+│   │   │   ├── ProcessPanel.tsx
+│   │   │   ├── CopilotChat.tsx
+│   │   │   ├── PermissionDialog.tsx
+│   │   │   ├── SelectionCard.tsx
+│   │   │   └── SummaryCard.tsx
 │   │   ├── hooks/
-│   │   ├── lib/
+│   │   │   ├── useProcessStream.ts
+│   │   │   └── useWebSocket.ts
 │   │   └── types/
+│   │       └── messages.ts
 │   ├── package.json
+│   ├── vite.config.ts
+│   ├── .env.example
 │   └── .env
 │
-└── docs/
+└── docs/                             # 设计文档
     ├── index.md
     ├── architecture.md
-    ├── configuration.md
+    ├── runtime.md                    # NEW: Runtime 中间层文档
     ├── backend.md
     ├── frontend.md
     ├── data-flow.md
+    ├── configuration.md
     └── copilotkit-integration.md
 ```

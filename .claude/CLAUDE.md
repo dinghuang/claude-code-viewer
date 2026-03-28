@@ -4,9 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Claude Code Viewer is a web application for visualizing Claude Code execution processes. It features a dual-pane interface: a phone-frame UI on the left (CopilotKit-style interaction) and a thinking process panel on the right (SSE stream).
+Claude Code Viewer is a web application for visualizing Claude Code execution processes. It uses a **3-service architecture**: React frontend (Port 3000) + Node.js CopilotKit Runtime middleware (Port 4000) + Python FastAPI backend (Port 8000).
 
 **重要：收到用户需求后，请先查阅文档索引找到相关知识作为上下文。**
+
+---
+
+## MCP 工具使用指南
+
+| 场景 | 推荐工具 | 说明 |
+|------|----------|------|
+| 搜索代码案例 | `mcp__github__search_code` | 在 GitHub 上搜索代码示例和实现参考 |
+| 搜索互联网信息 | `mcp__webresearch__search_google` / `mcp__webresearch__visit_page` | 搜索技术文档、API 参考、最佳实践等 |
 
 ---
 
@@ -18,36 +27,42 @@ Claude Code Viewer is a web application for visualizing Claude Code execution pr
 
 | 文档 | 说明 | 路径 |
 |------|------|------|
-| [架构设计](docs/architecture.md) | 系统整体架构和技术选型 | `docs/architecture.md` |
-| [数据流设计](docs/data-flow.md) | 消息流向和处理流程 | `docs/data-flow.md` |
-| [配置管理](docs/configuration.md) | 环境变量、系统提示词配置 | `docs/configuration.md` |
+| [架构设计](docs/architecture.md) | 三服务架构、技术选型、项目结构 | `docs/architecture.md` |
+| [数据流设计](docs/data-flow.md) | AG-UI 事件流、双通道数据流、权限处理 | `docs/data-flow.md` |
+| [配置管理](docs/configuration.md) | 三个服务的环境变量、系统提示词配置 | `docs/configuration.md` |
 
 ### 模块设计
 
 | 文档 | 说明 | 路径 |
 |------|------|------|
-| [后端设计](docs/backend.md) | Python FastAPI 后端模块设计 | `docs/backend.md` |
-| [前端设计](docs/frontend.md) | React + CopilotKit 前端组件设计 | `docs/frontend.md` |
+| [后端设计](docs/backend.md) | Python FastAPI + LangGraph + AG-UI 端点 | `docs/backend.md` |
+| [Runtime 中间层](docs/runtime.md) | Node.js CopilotKit Runtime 协议转换 | `docs/runtime.md` |
+| [前端设计](docs/frontend.md) | React + CopilotKit + Tailwind CSS 组件 | `docs/frontend.md` |
 
 ### 集成指南
 
 | 文档 | 说明 | 路径 |
 |------|------|------|
-| [CopilotKit 集成](docs/copilotkit-integration.md) | CopilotKit 集成说明 | `docs/copilotkit-integration.md` |
+| [CopilotKit 集成](docs/copilotkit-integration.md) | CopilotKit v1.54.1 三层集成说明 | `docs/copilotkit-integration.md` |
 
 ---
 
 ## 技术栈
 
-### 前端
+### 前端 (Port 3000)
 - React 18 + Vite + Tailwind CSS
-- CopilotKit React (`@copilotkit/react-core`, `@copilotkit/react-ui`)
+- CopilotKit v1.54.1 (`@copilotkit/react-core`, `@copilotkit/react-ui`)
 
-### 后端
-- Python FastAPI
-- Claude Agent SDK (`claude-agent-sdk-python`)
-- CopilotKit SDK (`copilotkit`)
-- SSE (Server-Sent Events) via `sse-starlette`
+### Runtime 中间层 (Port 4000)
+- Node.js + `@copilotkit/runtime` v1.54.1
+- 协议转换: Single-Route JSON-RPC ↔ AG-UI SSE
+
+### 后端 (Port 8000)
+- Python 3.12 + FastAPI
+- LangGraph 1.0+ + ag-ui-langgraph 0.0.28
+- copilotkit 0.1.83
+- Claude Agent SDK
+- SSE (sse-starlette)
 
 ---
 
@@ -55,9 +70,9 @@ Claude Code Viewer is a web application for visualizing Claude Code execution pr
 
 ### Backend (from `backend/`)
 ```bash
-# Create and activate virtual environment first
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
+# Requires Python 3.12 (copilotkit SDK requires <3.13)
+python3.12 -m venv venv
+source venv/bin/activate
 
 pip install -r requirements.txt
 cp .env.example .env
@@ -65,40 +80,60 @@ cp .env.example .env
 uvicorn app.main:app --reload --port 8000
 ```
 
+### Runtime (from `frontend/`)
+```bash
+npx tsx server/copilotkit-runtime.ts
+# Or: npm run dev:runtime
+```
+
 ### Frontend (from `frontend/`)
 ```bash
 npm install
 cp .env.example .env
-npm run dev      # Start development server (Vite)
-npm run build    # Build for production
-npm run lint     # Run ESLint
+npm run dev          # Start Vite dev server (Port 3000)
+npm run dev:runtime  # Start CopilotKit Runtime (Port 4000)
+npm run dev:all      # Start both frontend + runtime
+npm run build        # Build for production
+npm run lint         # Run ESLint
 ```
 
 ---
 
 ## Architecture Overview
 
+### 3-Service Architecture
+```
+Frontend (3000)  →  Runtime (4000)  →  Backend (8000)
+React+CopilotKit    Node.js Middleware   Python+LangGraph
+Single-Route        Protocol Bridge      AG-UI SSE
+```
+
 ### Backend Structure (`backend/app/`)
-- `main.py` - FastAPI entry point + CopilotKit integration
+- `main.py` - FastAPI entry + AG-UI endpoint via `add_langgraph_fastapi_endpoint`
 - `config.py` - Pydantic settings with system prompt loading
 - `models.py` - ProcessMessage model for SSE stream
-- `agents/claude_code_agent.py` - CopilotKit Agent bridging to Claude SDK
-- `sdk/client.py` - Claude SDK client wrapper
 - `api/process_stream.py` - SSE endpoint for thinking process
+- `agents/` - Agent definitions (reserved for Claude SDK integration)
+- `sdk/` - Claude SDK client wrapper (reserved)
+
+### Runtime (`frontend/server/`)
+- `copilotkit-runtime.ts` - CopilotKit Runtime server (Node.js)
+  - `CopilotRuntime` + `ExperimentalEmptyAdapter`
+  - `LangGraphHttpAgent` → forwards to Python backend
 
 ### Frontend Structure (`frontend/src/`)
-- `App.tsx` - CopilotKit provider with dual-pane layout
+- `App.tsx` - CopilotKit provider (`runtimeUrl` → port 4000) + dual-pane layout
 - `components/PhoneFrame.tsx` - Phone mockup container
-- `components/ProcessPanel.tsx` - Thinking process display (SSE)
+- `components/ProcessPanel.tsx` - Thinking process display (SSE → port 8000)
 - `hooks/useProcessStream.ts` - SSE subscription hook
 - `types/messages.ts` - ProcessMessage type definitions
 
 ### Communication Flow
-1. User input → CopilotKit UI → `/copilotkit` endpoint
-2. `ClaudeCodeAgent.execute()` → Claude SDK Client
-3. Claude SDK → Claude Code CLI (local)
-4. Thinking process → SSE broadcast → Frontend ProcessPanel
-5. Permission requests → CopilotKit Actions → User interaction
+1. User input → CopilotKit Chat → Single-Route POST to Runtime (4000)
+2. Runtime → AG-UI POST to Backend (8000)
+3. Backend LangGraphAgent → executes StateGraph → returns SSE events
+4. Events flow back: Backend → Runtime → Frontend CopilotChat
+5. Thinking process → independent SSE channel → Frontend ProcessPanel
 
 ---
 
@@ -119,31 +154,28 @@ COPILOTKIT_LLM_BASE_URL=https://api.anthropic.com
 COPILOTKIT_LLM_MODEL=claude-sonnet-4-5
 ```
 
-### Frontend (.env)
+### Runtime (env vars)
 ```bash
-VITE_API_URL=http://localhost:8000
+AGENT_URL=http://localhost:8000     # Python backend URL
+RUNTIME_PORT=4000                   # Runtime listen port
 ```
 
----
-
-## Tool Risk Levels
-
-Defined in `agents/claude_code_agent.py`:
-- **LOW**: read, ls, glob, grep, search, web_fetch, web_search (auto-approved)
-- **MEDIUM**: git, npm, pip, mkdir, mv (requires confirmation)
-- **HIGH**: Bash, Write, Edit, rm, delete, sudo (requires explicit approval)
+### Frontend (.env)
+```bash
+VITE_API_URL=http://localhost:8000                    # For SSE stream
+VITE_COPILOTKIT_RUNTIME_URL=http://localhost:4000     # For CopilotKit
+```
 
 ---
 
 ## Key Files to Reference
 
-When working on specific tasks, refer to:
-
 | Task | Key Files |
 |------|-----------|
-| Modify backend API | `backend/app/main.py`, `backend/app/api/` |
-| Modify agent behavior | `backend/app/agents/claude_code_agent.py` |
+| Modify backend API / Agent | `backend/app/main.py` |
+| Modify AG-UI endpoint | `backend/app/main.py` (LangGraph graph definition) |
 | Add configuration | `backend/app/config.py`, `backend/.env.example` |
+| Modify Runtime | `frontend/server/copilotkit-runtime.ts` |
 | Modify frontend layout | `frontend/src/App.tsx`, `frontend/src/components/PhoneFrame.tsx` |
 | Modify process panel | `frontend/src/components/ProcessPanel.tsx`, `frontend/src/hooks/useProcessStream.ts` |
 | Update types | `frontend/src/types/messages.ts`, `backend/app/models.py` |
@@ -152,15 +184,19 @@ When working on specific tasks, refer to:
 
 ## Dependencies
 
-### Backend (Python)
+### Backend (Python 3.12)
 - `fastapi>=0.115.0`
-- `copilotkit>=0.1.0`
-- `langgraph>=0.3.25`
-- `langchain>=0.3.0`
+- `copilotkit>=0.1.83`
+- `ag-ui-langgraph>=0.0.27`
+- `langgraph>=1.0.0`
+- `langchain-core>=1.2.0`
+- `claude-agent-sdk>=0.1.0`
 - `sse-starlette>=1.8.0`
 
 ### Frontend (Node.js)
-- `@copilotkit/react-core`
-- `@copilotkit/react-ui`
-- `react`, `react-dom`
-- `tailwindcss`
+- `@copilotkit/react-core` ^1.54.1
+- `@copilotkit/react-ui` ^1.54.1
+- `@copilotkit/runtime` ^1.54.1
+- `react`, `react-dom` ^18
+- `tailwindcss` ^3.4
+- `tsx`, `reflect-metadata` (for Runtime)

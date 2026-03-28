@@ -1,16 +1,12 @@
 // frontend/src/App.tsx
-import { CopilotKit } from "@copilotkit/react-core";
+import { CopilotKit, useCoAgentStateRender } from "@copilotkit/react-core";
 import { CopilotChat } from "@copilotkit/react-ui";
-import { useCoAgentStateRender } from "@copilotkit/react-core";
 import "@copilotkit/react-ui/styles.css";
 import { PhoneFrame } from "./components/PhoneFrame";
 import { ProcessPanel } from "./components/ProcessPanel";
-import { PermissionDialog } from "./components/PermissionDialog";
-import type { PermissionData } from "./components/PermissionDialog";
 import { useState } from "react";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-const RUNTIME_URL = import.meta.env.VITE_COPILOTKIT_RUNTIME_URL || "http://localhost:4000";
+const RUNTIME_URL = (import.meta as any).env?.VITE_COPILOTKIT_RUNTIME_URL || "http://localhost:4000";
 
 export default function App() {
   const [showPanel, setShowPanel] = useState(false);
@@ -80,7 +76,7 @@ export default function App() {
 function CopilotChatUI() {
   useCoAgentStateRender({
     name: "claude_code",
-    render: ({ state, nodeName, status }) => {
+    render: (_args: any) => {
       return null;
     },
   });

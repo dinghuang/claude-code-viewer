@@ -2,35 +2,46 @@
 
 ## 概述
 
-本项目使用 CopilotKit 作为前端交互层，提供美化的聊天界面和丰富的交互组件。
+本项目使用 CopilotKit v1.54.1 提供前端 AI 聊天界面。CopilotKit 集成涉及三个层面：
+
+| 层 | 包 | 版本 | 协议 |
+|----|------|------|------|
+| 前端 React | `@copilotkit/react-core` + `@copilotkit/react-ui` | 1.54.1 | Single-Route JSON-RPC |
+| Runtime 中间层 | `@copilotkit/runtime` | 1.54.1 | Single-Route ↔ AG-UI |
+| Python 后端 | `copilotkit` + `ag-ui-langgraph` | 0.1.83 / 0.0.28 | AG-UI SSE Events |
 
 ## 架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Frontend (React)                           │
+│                    Frontend (React, Port 3000)                   │
 │  ┌───────────────────────────────────────────────────────────┐ │
-│  │  CopilotKit Provider                                      │ │
-│  │  ┌─────────────────┐  ┌────────────────────────────────┐ │ │
-│  │  │ CopilotChat     │  │ CopilotAction                  │ │ │
-│  │  │ - Chat UI       │  │ - PermissionCard               │ │ │
-│  │  │ - Messages      │  │ - SelectionCard                │ │ │
-│  │  │ - Input         │  │ - ProgressCard                 │ │ │
-│  │  └─────────────────┘  └────────────────────────────────┘ │ │
+│  │  <CopilotKit runtimeUrl="http://localhost:4000/copilotkit" │ │
+│  │              agent="claude_code">                           │ │
+│  │    <CopilotChat />                                         │ │
+│  │  </CopilotKit>                                             │ │
 │  └───────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              │ AG-UI Protocol (SSE)
-                              ▼
+└────────────────────────────┬────────────────────────────────────┘
+                             │ Single-Route JSON-RPC
+                             │ POST /copilotkit
+                             │ {"method":"agent/run","params":{...},"body":{...}}
+                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Backend (FastAPI)                            │
+│                CopilotKit Runtime (Node.js, Port 4000)           │
 │  ┌───────────────────────────────────────────────────────────┐ │
-│  │  CopilotKitRemoteEndpoint                                 │ │
-│  │  ┌─────────────────────────────────────────────────────┐ │ │
-│  │  │  ClaudeCodeAgent (CopilotKit Agent)                 │ │ │
-│  │  │  ├── execute() → 执行 Claude 任务                   │ │ │
-│  │  │  └── 权限请求 → CopilotKit Action                   │ │ │
-│  │  └─────────────────────────────────────────────────────┘ │ │
+│  │  CopilotRuntime + ExperimentalEmptyAdapter                 │ │
+│  │  agents: { claude_code: LangGraphHttpAgent(url: ":8000") } │ │
+│  │  copilotRuntimeNodeHttpEndpoint(endpoint: "/copilotkit")   │ │
+│  └───────────────────────────────────────────────────────────┘ │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ AG-UI Protocol
+                             │ POST / (SSE Response)
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  Backend (Python FastAPI, Port 8000)              │
+│  ┌───────────────────────────────────────────────────────────┐ │
+│  │  LangGraphAgent(name="claude_code", graph=compiled_graph)  │ │
+│  │  add_langgraph_fastapi_endpoint(app, agent, path="/")      │ │
 │  └───────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -40,47 +51,58 @@
 ### 1. 安装依赖
 
 ```bash
-npm install @copilotkit/react-core @copilotkit/react-ui
+npm install @copilotkit/react-core @copilotkit/react-ui @copilotkit/runtime
+npm install reflect-metadata tsx   # Runtime 运行需要
 ```
 
-### 2. 配置 Provider
+### 2. CopilotKit Provider
 
 ```tsx
-// App.tsx
-import { CopilotKit } from "@copilotkit/react";
+import { CopilotKit } from "@copilotkit/react-core";
+import { CopilotChat } from "@copilotkit/react-ui";
+import "@copilotkit/react-ui/styles.css";
+
+const RUNTIME_URL = import.meta.env.VITE_COPILOTKIT_RUNTIME_URL || "http://localhost:4000";
 
 export default function App() {
   return (
     <CopilotKit
-      publicApiKey={import.meta.env.VITE_COPILOTKIT_PUBLIC_API_KEY}
+      runtimeUrl={`${RUNTIME_URL}/copilotkit`}
       agent="claude_code"
-      runtimeUrl={import.meta.env.VITE_API_URL + "/copilotkit"}
     >
-      {/* 应用组件 */}
+      <CopilotChat
+        instructions="你是一个 Claude Code 助手"
+        labels={{ title: "Claude Code", initial: "有什么我可以帮你的？" }}
+      />
     </CopilotKit>
   );
 }
 ```
 
-### 3. 使用聊天组件
+**关键点：**
+- `runtimeUrl` 必须指向 **Runtime** (port 4000)，不是 Python 后端
+- `agent` 值必须匹配后端 `LangGraphAgent` 的 `name`
+- CopilotKit v1.54.1 内部自动使用 `useSingleEndpoint: true`
 
-```tsx
-import { CopilotPopup } from "@copilotkit/react-ui";
-import "@copilotkit/react-ui/styles.css";
+### 3. CopilotKit Runtime Server
 
-export function Chat() {
-  return (
-    <CopilotPopup
-      instructions="你是一个 Claude Code 助手"
-      labels={{
-        title: "Claude Code",
-        initial: "有什么我可以帮你的？",
-        placeholder: "输入你的问题...",
-      }}
-      defaultOpen={true}
-    />
-  );
-}
+```typescript
+// frontend/server/copilotkit-runtime.ts
+import "reflect-metadata";
+import { CopilotRuntime, ExperimentalEmptyAdapter, copilotRuntimeNodeHttpEndpoint } from "@copilotkit/runtime";
+import { LangGraphHttpAgent } from "@copilotkit/runtime/langgraph";
+
+const runtime = new CopilotRuntime({
+  agents: {
+    claude_code: new LangGraphHttpAgent({ url: "http://localhost:8000" }),
+  },
+});
+
+const handler = copilotRuntimeNodeHttpEndpoint({
+  runtime,
+  serviceAdapter: new ExperimentalEmptyAdapter(),
+  endpoint: "/copilotkit",
+});
 ```
 
 ## 后端集成
@@ -88,289 +110,73 @@ export function Chat() {
 ### 1. 安装依赖
 
 ```bash
-pip install copilotkit langchain-openai
+pip install "copilotkit>=0.1.83" "ag-ui-langgraph>=0.0.27" "langgraph>=1.0.0"
 ```
 
-### 2. 创建 Endpoint
+### 2. 创建 LangGraph Agent
 
 ```python
-from copilotkit import CopilotKitRemoteEndpoint
-from langchain_openai import ChatOpenAI
+from langgraph.graph import StateGraph, MessagesState, START, END
+from langchain_core.messages import AIMessage
+from ag_ui_langgraph import LangGraphAgent, add_langgraph_fastapi_endpoint
 
-def create_copilotkit_endpoint():
-    llm = ChatOpenAI(
-        api_key=settings.copilotkit_llm_api_key,
-        base_url=settings.copilotkit_llm_base_url,
-        model=settings.copilotkit_llm_model,
-    )
+def chat_node(state: MessagesState):
+    user_message = state.get("messages", [])[-1].content
+    return {"messages": [AIMessage(content=f"收到: {user_message}")]}
 
-    return CopilotKitRemoteEndpoint(
-        agents=[
-            ClaudeCodeAgent(
-                name="claude_code",
-                description="Claude Code 助手",
-                llm=llm,
-            )
-        ],
-    )
+graph = StateGraph(MessagesState)
+graph.add_node("chat", chat_node)
+graph.add_edge(START, "chat")
+graph.add_edge("chat", END)
+
+agent = LangGraphAgent(
+    name="claude_code",
+    graph=graph.compile(checkpointer=MemorySaver()),
+)
 ```
 
-### 3. 注册到 FastAPI
+### 3. 注册 AG-UI 端点
 
 ```python
-from copilotkit.integrations.fastapi import add_fastapi_endpoint
+from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 
 app = FastAPI()
-sdk = create_copilotkit_endpoint()
-add_fastapi_endpoint(app, sdk, "/copilotkit")
+add_langgraph_fastapi_endpoint(app, agent, path="/")
 ```
 
-## 自定义 Agent
+## 版本兼容性
 
-### Agent 基类
+| 前端包 | 版本 | Python 包 | 版本 | 兼容性 |
+|--------|------|-----------|------|--------|
+| @copilotkit/react-core | 1.54.1 | copilotkit | 0.1.83 | 通过 Runtime 桥接 |
+| @copilotkit/runtime | 1.54.1 | ag-ui-langgraph | 0.0.28 | AG-UI 协议 |
 
-```python
-from copilotkit import Agent
-from abc import abstractmethod
-
-class ClaudeCodeAgent(Agent):
-    def __init__(self, name, description, llm):
-        super().__init__(name=name, description=description)
-        self.llm = llm
-
-    @abstractmethod
-    async def execute(
-        self,
-        messages: List[Dict],
-        thread_id: str,
-        state: Dict,
-        **kwargs
-    ):
-        """执行 Agent - 返回生成器"""
-        pass
-```
-
-### 实现示例
-
-```python
-async def execute(self, messages, thread_id, state, **kwargs):
-    user_message = messages[-1]["content"]
-
-    # 调用 Claude SDK
-    client = create_claude_client(
-        can_use_tool=self._handle_permission,
-    )
-
-    async with client:
-        await client.query(user_message, session_id=thread_id)
-
-        async for msg in client.receive_messages():
-            # 广播思维过程
-            await self._broadcast(msg)
-
-            # 返回最终结果
-            if isinstance(msg, ResultMessage):
-                yield {
-                    "content": msg.result or "任务完成",
-                    "metadata": {"cost": msg.total_cost_usd}
-                }
-```
-
-## 自定义 Actions
-
-### 注册 Action
-
-```tsx
-// 前端
-import { useCopilotAction } from "@copilotkit/react-core";
-
-useCopilotAction({
-  name: "request_permission",
-  description: "请求用户权限确认",
-  parameters: [
-    { name: "requestId", type: "string" },
-    { name: "toolName", type: "string" },
-    { name: "description", type: "string" },
-    { name: "riskLevel", type: "string" },
-  ],
-  renderAndWaitForResponse: async ({ args, respond }) => {
-    // 显示 UI 并等待用户响应
-    const approved = await showPermissionDialog(args);
-    respond({ approved });
-  },
-});
-```
-
-### Action 类型
-
-1. **普通 Action** - 执行操作
-
-```tsx
-useCopilotAction({
-  name: "my_action",
-  handler: async ({ args }) => {
-    // 执行操作
-    return { result: "done" };
-  },
-});
-```
-
-2. **渲染等待响应** - 显示 UI 并等待
-
-```tsx
-useCopilotAction({
-  name: "confirm_action",
-  renderAndWaitForResponse: async ({ args, respond }) => {
-    // 显示确认对话框
-    // 用户响应后调用 respond()
-  },
-});
-```
-
-## 聊天建议
-
-```tsx
-import { useCopilotChatSuggestions } from "@copilotkit/react-core";
-
-useCopilotChatSuggestions({
-  instructions: "建议用户询问关于代码、文件操作的问题",
-  suggestions: [
-    "帮我创建一个新文件",
-    "读取当前目录的文件",
-    "执行这个命令",
-  ],
-});
-```
-
-## 状态管理
-
-### 读取状态
-
-```tsx
-import { useCoagentStateRender } from "@copilotkit/react-core";
-
-useCoagentStateRender({
-  name: "claude_code",
-  render: ({ state }) => {
-    return (
-      <div>
-        <p>当前状态: {state.status}</p>
-        <p>进度: {state.progress}%</p>
-      </div>
-    );
-  },
-});
-```
-
-### 更新状态
-
-在 Agent 中返回状态更新：
-
-```python
-yield {
-  "content": "处理中...",
-  "state": {
-    "status": "processing",
-    "progress": 50,
-  }
-}
-```
-
-## 样式定制
-
-### 主题配置
-
-```tsx
-<CopilotKit
-  theme={{
-    colors: {
-      primary: "#7C3AED",
-      secondary: "#4F46E5",
-      background: "#FFFFFF",
-      text: "#1F2937",
-    },
-    fonts: {
-      body: "Inter, sans-serif",
-      code: "Fira Code, monospace",
-    },
-  }}
->
-  {/* ... */}
-</CopilotKit>
-```
-
-### 自定义 CSS
-
-```css
-/* 覆盖 CopilotKit 默认样式 */
-.copilotKitPopup {
-  border-radius: 16px;
-}
-
-.copilotKitMessage {
-  font-size: 14px;
-}
-
-.copilotKitInput {
-  border-radius: 8px;
-}
-```
+**注意：**
+- Python copilotkit SDK 要求 Python 3.10-3.12
+- 前端与后端不直接通信，通过 Runtime 中间层桥接
+- Runtime 同时包含在前端的 npm 依赖中
 
 ## 调试
 
-### 启用调试模式
+### 检查 Runtime 信息
 
-```tsx
-<CopilotKit
-  debug={true}  // 启用调试日志
->
-  {/* ... */}
-</CopilotKit>
+```bash
+curl -s -X POST http://localhost:4000/copilotkit \
+  -H "Content-Type: application/json" \
+  -d '{"method":"info"}'
 ```
 
-### 查看通信内容
+### 检查后端 AG-UI 端点
 
-```tsx
-useEffect(() => {
-  const handler = (event) => {
-    console.log("CopilotKit Event:", event.detail);
-  };
-
-  window.addEventListener("copilotkit:event", handler);
-  return () => window.removeEventListener("copilotkit:event", handler);
-}, []);
+```bash
+curl -s http://localhost:8000/health
 ```
 
-## 常见问题
+### 常见错误
 
-### 1. 连接失败
-
-检查后端 URL 配置：
-
-```tsx
-<CopilotKit
-  runtimeUrl="http://localhost:8000/copilotkit"  // 确保正确
->
-```
-
-### 2. Action 不触发
-
-确保参数类型正确：
-
-```tsx
-useCopilotAction({
-  name: "my_action",
-  parameters: [
-    { name: "count", type: "number" },  // 不是 "integer"
-    { name: "name", type: "string" },
-  ],
-});
-```
-
-### 3. 样式不生效
-
-确保导入了样式文件：
-
-```tsx
-import "@copilotkit/react-ui/styles.css";
-```
+| 错误 | 原因 | 解决 |
+|------|------|------|
+| `Missing method field` | 前端发送了 GraphQL 而非 Single-Route | 检查 CopilotKit 版本和 runtimeUrl |
+| `HTTP 422` | AG-UI 请求缺少必填字段 | 确保 Runtime 正确转发请求 |
+| `Connection refused :4000` | Runtime 未启动 | `npm run dev:runtime` |
+| Python 版本不兼容 | copilotkit 不支持 Python 3.13+ | 使用 Python 3.12 |

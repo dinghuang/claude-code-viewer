@@ -139,49 +139,15 @@ async def execute_node(state: ClaudeCodeState):
 
     settings = get_settings()
 
-    # Permission handler using LangGraph interrupt
-    async def handle_permission(tool_name, tool_input, context):
-        risk = get_risk_level(tool_name)
-
-        # Auto-approve low-risk
-        if risk == "low":
-            return PermissionResultAllow()
-
-        # Broadcast permission request to ProcessPanel
-        request_id = str(uuid.uuid4())
-        await broadcast_to_subscribers(ProcessMessage(
-            id=request_id,
-            type=ProcessMessageType.PERMISSION,
-            content=f"请求执行工具: {tool_name}",
-            timestamp=int(time.time() * 1000),
-            tool_name=tool_name,
-            tool_input=tool_input,
-            risk_level=risk,
-        ))
-
-        # Interrupt graph — value is sent to frontend via AG-UI state snapshot
-        response = interrupt({
-            "request_id": request_id,
-            "tool_name": tool_name,
-            "tool_input": tool_input,
-            "risk_level": risk,
-            "description": f"Claude 请求执行 {tool_name}",
-        })
-
-        # When graph resumes, response contains user's decision
-        if isinstance(response, dict) and response.get("approved"):
-            return PermissionResultAllow()
-        else:
-            reason = response.get("reason", "用户拒绝") if isinstance(response, dict) else "用户拒绝"
-            return PermissionResultDeny(message=reason)
-
-    # Build options
+    # Build options — use bypassPermissions for now, permission bridging via
+    # CopilotKit Action + interrupt() will be added once the streaming prompt
+    # issue with can_use_tool is resolved upstream in claude-agent-sdk.
     base_opts = build_claude_options()
     system_prompt = settings.get_system_prompt() if not state.get("system_prompt_loaded") else None
 
     options = ClaudeAgentOptions(
         **base_opts,
-        can_use_tool=handle_permission,
+        permission_mode="bypassPermissions",
         **({"system_prompt": system_prompt} if system_prompt else {}),
     )
 
@@ -191,6 +157,7 @@ async def execute_node(state: ClaudeCodeState):
 
     try:
         async for msg in query(prompt=user_message, options=options):
+            logger.info(f"SDK message: type={type(msg).__name__}")
             process_msg = convert_to_process_message(msg)
             if process_msg:
                 await broadcast_to_subscribers(process_msg)
