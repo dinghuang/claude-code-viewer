@@ -18,6 +18,8 @@ from claude_agent_sdk import (
     PermissionResultDeny,
     ResultMessage,
     AssistantMessage,
+    UserMessage,
+    SystemMessage as ClaudeSystemMessage,
     ThinkingBlock,
     ToolUseBlock,
     ToolResultBlock,
@@ -61,55 +63,104 @@ def get_risk_level(tool_name: str) -> str:
 
 # ============ Message converter ============
 
-def convert_to_process_message(msg) -> Optional[ProcessMessage]:
-    msg_id = str(uuid.uuid4())
+def convert_to_process_messages(msg) -> list[ProcessMessage]:
+    """Convert a Claude SDK message to one or more ProcessMessages.
+
+    AssistantMessage can contain multiple blocks (ThinkingBlock, ToolUseBlock,
+    TextBlock), each becoming a separate ProcessMessage. UserMessage contains
+    ToolResultBlock from tool execution. SystemMessage shows init info.
+    """
     ts = int(time.time() * 1000)
+    results = []
 
     if isinstance(msg, AssistantMessage):
-        texts = []
         for block in msg.content:
-            if isinstance(block, TextBlock):
-                texts.append(block.text)
-        if texts:
-            return ProcessMessage(
-                id=msg_id, type=ProcessMessageType.TEXT,
-                content="\n".join(texts)[:500], timestamp=ts,
-            )
+            msg_id = str(uuid.uuid4())
+            if isinstance(block, ThinkingBlock):
+                if block.thinking.strip():
+                    results.append(ProcessMessage(
+                        id=msg_id, type=ProcessMessageType.THINKING,
+                        content=block.thinking[:1000], timestamp=ts,
+                    ))
+            elif isinstance(block, ToolUseBlock):
+                results.append(ProcessMessage(
+                    id=msg_id, type=ProcessMessageType.TOOL_USE,
+                    content=f"调用工具: {block.name}",
+                    timestamp=ts, tool_name=block.name, tool_input=block.input,
+                ))
+            elif isinstance(block, TextBlock):
+                if block.text.strip():
+                    results.append(ProcessMessage(
+                        id=msg_id, type=ProcessMessageType.TEXT,
+                        content=block.text[:1000], timestamp=ts,
+                    ))
+            elif isinstance(block, ToolResultBlock):
+                content = block.content if isinstance(block.content, str) else str(block.content)
+                results.append(ProcessMessage(
+                    id=msg_id, type=ProcessMessageType.TOOL_RESULT,
+                    content=content[:1000], timestamp=ts, tool_result=block.content,
+                ))
 
+    elif isinstance(msg, UserMessage):
+        # UserMessage contains ToolResultBlock from tool execution
+        content_list = msg.content if isinstance(msg.content, list) else []
+        for block in content_list:
+            if isinstance(block, ToolResultBlock):
+                msg_id = str(uuid.uuid4())
+                content = block.content if isinstance(block.content, str) else str(block.content)
+                results.append(ProcessMessage(
+                    id=msg_id, type=ProcessMessageType.TOOL_RESULT,
+                    content=content[:1000], timestamp=ts, tool_result=block.content,
+                ))
+
+    elif isinstance(msg, ClaudeSystemMessage):
+        msg_id = str(uuid.uuid4())
+        subtype = getattr(msg, 'subtype', '')
+        if subtype == 'init':
+            data = getattr(msg, 'data', {})
+            cwd = data.get('cwd', '') if isinstance(data, dict) else ''
+            session_id = data.get('session_id', '')[:8] if isinstance(data, dict) else ''
+            results.append(ProcessMessage(
+                id=msg_id, type=ProcessMessageType.TEXT,
+                content=f"[会话初始化] 工作目录: {cwd}" + (f" (session: {session_id}...)" if session_id else ""),
+                timestamp=ts,
+            ))
+
+    elif isinstance(msg, ResultMessage):
+        msg_id = str(uuid.uuid4())
+        cost_str = f"${msg.total_cost_usd:.4f}" if msg.total_cost_usd else ""
+        duration_str = f"{msg.duration_ms / 1000:.1f}s" if msg.duration_ms else ""
+        turns_str = f"{msg.num_turns} turns" if hasattr(msg, 'num_turns') and msg.num_turns else ""
+        meta_parts = [p for p in [cost_str, duration_str, turns_str] if p]
+        content = f"任务完成 ({', '.join(meta_parts)})" if meta_parts else "任务完成"
+        results.append(ProcessMessage(
+            id=msg_id, type=ProcessMessageType.RESULT,
+            content=content, timestamp=ts, cost=msg.total_cost_usd,
+        ))
+
+    # Standalone blocks (rare, but handle just in case)
     elif isinstance(msg, ThinkingBlock):
-        return ProcessMessage(
-            id=msg_id, type=ProcessMessageType.THINKING,
-            content=msg.thinking[:500], timestamp=ts,
-        )
+        if msg.thinking.strip():
+            results.append(ProcessMessage(
+                id=str(uuid.uuid4()), type=ProcessMessageType.THINKING,
+                content=msg.thinking[:1000], timestamp=ts,
+            ))
 
     elif isinstance(msg, ToolUseBlock):
-        return ProcessMessage(
-            id=msg_id, type=ProcessMessageType.TOOL_USE,
+        results.append(ProcessMessage(
+            id=str(uuid.uuid4()), type=ProcessMessageType.TOOL_USE,
             content=f"调用工具: {msg.name}",
             timestamp=ts, tool_name=msg.name, tool_input=msg.input,
-        )
+        ))
 
     elif isinstance(msg, ToolResultBlock):
         content = msg.content if isinstance(msg.content, str) else str(msg.content)
-        return ProcessMessage(
-            id=msg_id, type=ProcessMessageType.TOOL_RESULT,
-            content=content[:500], timestamp=ts, tool_result=msg.content,
-        )
+        results.append(ProcessMessage(
+            id=str(uuid.uuid4()), type=ProcessMessageType.TOOL_RESULT,
+            content=content[:1000], timestamp=ts, tool_result=msg.content,
+        ))
 
-    elif isinstance(msg, ResultMessage):
-        # ResultMessage.result duplicates the last AssistantMessage text,
-        # so only show metadata (cost/duration), not the text again.
-        cost_str = f"${msg.total_cost_usd:.4f}" if msg.total_cost_usd else ""
-        duration_str = f"{msg.duration_ms / 1000:.1f}s" if msg.duration_ms else ""
-        meta_parts = [p for p in [cost_str, duration_str] if p]
-        content = f"任务完成 ({', '.join(meta_parts)})" if meta_parts else "任务完成"
-        return ProcessMessage(
-            id=msg_id, type=ProcessMessageType.RESULT,
-            content=content,
-            timestamp=ts, cost=msg.total_cost_usd,
-        )
-
-    return None
+    return results
 
 
 # ============ In-memory system prompt store ============
@@ -181,8 +232,7 @@ async def execute_node(state: ClaudeCodeState):
     try:
         async for msg in query(prompt=user_message, options=options):
             logger.info(f"SDK message: type={type(msg).__name__}")
-            process_msg = convert_to_process_message(msg)
-            if process_msg:
+            for process_msg in convert_to_process_messages(msg):
                 await broadcast_to_subscribers(process_msg)
 
             if isinstance(msg, ResultMessage):
