@@ -4,7 +4,7 @@ import { CopilotChat } from "@copilotkit/react-ui";
 import "@copilotkit/react-ui/styles.css";
 import { PhoneFrame } from "./components/PhoneFrame";
 import { ProcessPanel } from "./components/ProcessPanel";
-import { SystemPromptPanel, DEFAULT_PROMPT } from "./components/SystemPromptPanel";
+import { SettingsPanel, DEFAULT_PROMPT } from "./components/SystemPromptPanel";
 import { useState, useEffect } from "react";
 
 const RUNTIME_URL = (import.meta as any).env?.VITE_COPILOTKIT_RUNTIME_URL || "http://localhost:4000";
@@ -13,14 +13,22 @@ const API_URL = (import.meta as any).env?.VITE_API_URL || "http://localhost:8000
 export default function App() {
   const [showPanel, setShowPanel] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_PROMPT);
+  const [permissionMode, setPermissionMode] = useState("bypassPermissions");
 
-  // Sync default prompt to backend on mount
+  // Sync defaults to backend on mount
   useEffect(() => {
-    fetch(`${API_URL}/api/system-prompt`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: systemPrompt }),
-    }).catch(() => {});
+    Promise.all([
+      fetch(`${API_URL}/api/system-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: systemPrompt }),
+      }),
+      fetch(`${API_URL}/api/permission-mode`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: permissionMode }),
+      }),
+    ]).catch(() => {});
   }, []);
 
   return (
@@ -28,8 +36,13 @@ export default function App() {
       runtimeUrl={`${RUNTIME_URL}/copilotkit`}
       agent="claude_code"
     >
-      {/* System prompt editor — fixed bottom-left */}
-      <SystemPromptPanel value={systemPrompt} onChange={setSystemPrompt} />
+      {/* Settings panel — bottom-left gear */}
+      <SettingsPanel
+        systemPrompt={systemPrompt}
+        onSystemPromptChange={setSystemPrompt}
+        permissionMode={permissionMode}
+        onPermissionModeChange={setPermissionMode}
+      />
 
       <div className="flex flex-col lg:flex-row h-screen bg-gray-100">
         {/* 移动端顶部切换栏 */}

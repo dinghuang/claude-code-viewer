@@ -166,6 +166,7 @@ def convert_to_process_messages(msg) -> list[ProcessMessage]:
 # ============ In-memory system prompt store ============
 
 _system_prompt_override: Optional[str] = None
+_permission_mode: str = "bypassPermissions"
 
 
 def set_system_prompt(prompt: str):
@@ -179,6 +180,16 @@ def get_effective_system_prompt() -> Optional[str]:
     if _system_prompt_override is not None:
         return _system_prompt_override
     return get_settings().get_system_prompt()
+
+
+def set_permission_mode(mode: str):
+    """Set permission mode from frontend."""
+    global _permission_mode
+    _permission_mode = mode
+
+
+def get_permission_mode() -> str:
+    return _permission_mode
 
 
 # ============ Nodes ============
@@ -213,15 +224,13 @@ async def execute_node(state: ClaudeCodeState):
 
     settings = get_settings()
 
-    # Build options — use bypassPermissions for now, permission bridging via
-    # CopilotKit Action + interrupt() will be added once the streaming prompt
-    # issue with can_use_tool is resolved upstream in claude-agent-sdk.
     base_opts = build_claude_options()
     system_prompt = get_effective_system_prompt() if not state.get("system_prompt_loaded") else None
+    perm_mode = get_permission_mode()
 
     options = ClaudeAgentOptions(
         **base_opts,
-        permission_mode="bypassPermissions",
+        permission_mode=perm_mode,
         **({"system_prompt": system_prompt} if system_prompt else {}),
     )
 

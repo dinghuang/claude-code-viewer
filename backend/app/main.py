@@ -10,7 +10,10 @@ import warnings
 
 from app.config import get_settings
 from app.api import process_stream
-from app.agents.claude_code_agent import build_graph, set_system_prompt, get_effective_system_prompt
+from app.agents.claude_code_agent import (
+    build_graph, set_system_prompt, get_effective_system_prompt,
+    set_permission_mode, get_permission_mode,
+)
 from ag_ui_langgraph import LangGraphAgent, add_langgraph_fastapi_endpoint
 
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
@@ -90,3 +93,19 @@ async def update_system_prompt(request: Request):
     set_system_prompt(prompt)
     logger.info(f"系统提示词已更新 ({len(prompt)} 字符)")
     return {"status": "ok", "length": len(prompt)}
+
+
+@app.get("/api/permission-mode")
+async def get_perm_mode():
+    """Get current permission mode."""
+    return {"mode": get_permission_mode()}
+
+
+@app.post("/api/permission-mode")
+async def update_perm_mode(request: Request):
+    """Update permission mode from frontend."""
+    body = await request.json()
+    mode = body.get("mode", "bypassPermissions")
+    set_permission_mode(mode)
+    logger.info(f"权限模式已更新: {mode}")
+    return {"status": "ok", "mode": mode}

@@ -32,33 +32,57 @@ const DEFAULT_PROMPT = `# Claude Code Viewer 助手
 
 const API_URL = (import.meta as any).env?.VITE_API_URL || "http://localhost:8000";
 
-interface SystemPromptPanelProps {
-  value: string;
-  onChange: (prompt: string) => void;
+const PERMISSION_MODES = [
+  { value: "bypassPermissions", label: "跳过所有权限", desc: "自动批准所有操作" },
+  { value: "acceptEdits", label: "自动批准编辑", desc: "文件编辑自动批准，其他需确认" },
+  { value: "default", label: "默认模式", desc: "按 Claude Code 默认权限策略" },
+  { value: "plan", label: "计划模式", desc: "先展示计划，确认后执行" },
+];
+
+interface SettingsPanelProps {
+  systemPrompt: string;
+  onSystemPromptChange: (prompt: string) => void;
+  permissionMode: string;
+  onPermissionModeChange: (mode: string) => void;
 }
 
-export function SystemPromptPanel({ value, onChange }: SystemPromptPanelProps) {
+export function SettingsPanel({
+  systemPrompt,
+  onSystemPromptChange,
+  permissionMode,
+  onPermissionModeChange,
+}: SettingsPanelProps) {
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState(value);
+  const [draftPrompt, setDraftPrompt] = useState(systemPrompt);
+  const [draftMode, setDraftMode] = useState(permissionMode);
   const [saving, setSaving] = useState(false);
 
   const handleOpen = () => {
-    setDraft(value);
+    setDraftPrompt(systemPrompt);
+    setDraftMode(permissionMode);
     setOpen(true);
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await fetch(`${API_URL}/api/system-prompt`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: draft }),
-      });
-      onChange(draft);
+      await Promise.all([
+        fetch(`${API_URL}/api/system-prompt`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: draftPrompt }),
+        }),
+        fetch(`${API_URL}/api/permission-mode`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: draftMode }),
+        }),
+      ]);
+      onSystemPromptChange(draftPrompt);
+      onPermissionModeChange(draftMode);
       setOpen(false);
     } catch (e) {
-      console.error("Failed to save system prompt:", e);
+      console.error("Failed to save settings:", e);
     } finally {
       setSaving(false);
     }
@@ -66,11 +90,11 @@ export function SystemPromptPanel({ value, onChange }: SystemPromptPanelProps) {
 
   return (
     <>
-      {/* Floating gear button */}
+      {/* Floating gear button — bottom-left */}
       <button
         onClick={handleOpen}
         className="fixed bottom-4 left-4 z-50 w-10 h-10 bg-white rounded-full shadow-lg border border-gray-200 flex items-center justify-center hover:bg-gray-50 transition-colors"
-        title="编辑系统提示词"
+        title="设置"
       >
         <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -79,13 +103,13 @@ export function SystemPromptPanel({ value, onChange }: SystemPromptPanelProps) {
         </svg>
       </button>
 
-      {/* Modal overlay */}
+      {/* Modal */}
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-2xl w-[600px] max-w-[90vw] max-h-[80vh] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-2xl w-[600px] max-w-[90vw] max-h-[85vh] flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-800">系统提示词</h2>
+              <h2 className="text-lg font-semibold text-gray-800">设置</h2>
               <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -93,39 +117,73 @@ export function SystemPromptPanel({ value, onChange }: SystemPromptPanelProps) {
               </button>
             </div>
 
-            {/* Textarea */}
-            <div className="flex-1 px-6 py-4 overflow-auto">
-              <textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                className="w-full h-[400px] p-3 border border-gray-300 rounded-lg font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="输入系统提示词..."
-              />
+            {/* Content */}
+            <div className="flex-1 px-6 py-4 overflow-auto space-y-5">
+              {/* Permission Mode */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">权限模式</label>
+                <div className="space-y-2">
+                  {PERMISSION_MODES.map((m) => (
+                    <label
+                      key={m.value}
+                      className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                        draftMode === m.value
+                          ? "bg-blue-50 border-blue-300"
+                          : "bg-gray-50 border-gray-200 hover:bg-gray-100"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="permMode"
+                        value={m.value}
+                        checked={draftMode === m.value}
+                        onChange={() => setDraftMode(m.value)}
+                        className="mt-0.5"
+                      />
+                      <div>
+                        <div className="text-sm font-medium text-gray-800">{m.label}</div>
+                        <div className="text-xs text-gray-500">{m.desc}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* System Prompt */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">系统提示词</label>
+                  <button
+                    onClick={() => setDraftPrompt(DEFAULT_PROMPT)}
+                    className="text-xs text-gray-400 hover:text-gray-600"
+                  >
+                    恢复默认
+                  </button>
+                </div>
+                <textarea
+                  value={draftPrompt}
+                  onChange={(e) => setDraftPrompt(e.target.value)}
+                  className="w-full h-[300px] p-3 border border-gray-300 rounded-lg font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="输入系统提示词..."
+                />
+              </div>
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200">
+            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-200">
               <button
-                onClick={() => { setDraft(DEFAULT_PROMPT); }}
-                className="text-sm text-gray-500 hover:text-gray-700"
+                onClick={() => setOpen(false)}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
               >
-                恢复默认
+                取消
               </button>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setOpen(false)}
-                  className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="px-4 py-2 text-sm text-white bg-blue-500 hover:bg-blue-600 rounded-lg disabled:opacity-50"
-                >
-                  {saving ? "保存中..." : "保存"}
-                </button>
-              </div>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-4 py-2 text-sm text-white bg-blue-500 hover:bg-blue-600 rounded-lg disabled:opacity-50"
+              >
+                {saving ? "保存中..." : "保存"}
+              </button>
             </div>
           </div>
         </div>
