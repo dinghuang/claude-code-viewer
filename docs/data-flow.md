@@ -5,7 +5,7 @@
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                          用户输入                                     │
-│                       "帮我创建一个文件"                               │
+│                    "帮我分析一下新能源ETF"                              │
 └──────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -15,7 +15,7 @@
 │  │  用户消息 → CopilotKit Single-Route 请求                       │ │
 │  │  POST http://localhost:4000/copilotkit                         │ │
 │  │  {"method":"agent/run","params":{"agentId":"claude_code"},     │ │
-│  │   "body":{"messages":[...],"state":{}, ...}}                   │ │
+│  │   "body":{"messages":[...],"state":{}, "threadId":"session-*"}}│ │
 │  └────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────┘
                                 │
@@ -35,8 +35,9 @@
 │  ┌────────────────────────────────────────────────────────────────┐ │
 │  │  AG-UI 端点接收 RunAgentInput                                   │ │
 │  │  → LangGraphAgent.run() → 执行 StateGraph                      │ │
-│  │  → chat_node 处理用户消息                                       │ │
-│  │  → 返回 SSE 事件流 (RUN_STARTED, STEP_STARTED, ...)            │ │
+│  │  → prepare → execute (claude_agent_sdk) → permission_check     │ │
+│  │  → collect → 返回 AIMessage                                    │ │
+│  │  → SSE 事件流 (RUN_STARTED, STEP_STARTED, ...)                 │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────┘
                                 │
@@ -45,23 +46,13 @@
 │              AG-UI SSE 事件流 (后端 → Runtime → 前端)                  │
 │                                                                      │
 │  data: {"type":"RUN_STARTED","threadId":"...","runId":"..."}        │
-│  data: {"type":"STEP_STARTED","stepName":"chat"}                    │
+│  data: {"type":"STEP_STARTED","stepName":"prepare"}                 │
+│  data: {"type":"STEP_FINISHED","stepName":"prepare"}                │
+│  data: {"type":"STEP_STARTED","stepName":"execute"}                 │
 │  data: {"type":"STATE_SNAPSHOT","snapshot":{"messages":[...]}}      │
-│  data: {"type":"MESSAGES_SNAPSHOT","messages":[                     │
-│           {"id":"m1","role":"user","content":"帮我创建一个文件"},     │
-│           {"id":"m2","role":"assistant","content":"收到消息: ..."}   │
-│         ]}                                                          │
-│  data: {"type":"STEP_FINISHED","stepName":"chat"}                   │
+│  data: {"type":"STEP_FINISHED","stepName":"execute"}                │
+│  data: {"type":"MESSAGES_SNAPSHOT","messages":[...]}                │
 │  data: {"type":"RUN_FINISHED","threadId":"...","runId":"..."}       │
-└──────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│              Frontend 渲染响应                                        │
-│  ┌────────────────────────────────────────────────────────────────┐ │
-│  │  CopilotKit 解析 SSE 事件 → 更新聊天消息列表                    │ │
-│  │  显示 Assistant 回复在 CopilotChat 组件中                       │ │
-│  └────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -88,7 +79,7 @@
                            └────────>│ stream      │
                                      └─────────────┘
 
-通道 1: 聊天交互
+通道 1: 对话交互
   Frontend → Runtime → Backend → Runtime → Frontend
   协议: Single-Route → AG-UI SSE → Single-Route SSE
 
@@ -97,9 +88,39 @@
   协议: SSE (EventSource → /api/process-stream)
 ```
 
-## AG-UI 事件类型
+## Session 复用机制
 
-AG-UI 协议定义了以下事件类型：
+### 前端 threadId
+
+前端在页面加载时生成一个稳定的 `SESSION_THREAD_ID`，传给 CopilotKit：
+
+```typescript
+const SESSION_THREAD_ID = `session-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+<CopilotKit runtimeUrl="..." agent="claude_code" threadId={SESSION_THREAD_ID}>
+```
+
+同一页面会话内所有消息共享同一个 `threadId`，CopilotKit 和 LangGraph 使用此 ID 维护对话状态。
+
+### 后端 Claude Session 复用
+
+LangGraph State 中存储 `claude_session_id`：
+
+```
+第 1 条消息:
+  execute_node → query(prompt=..., options=ClaudeAgentOptions(...))
+  → 从 SystemMessage(init) 捕获 session_id → 存入 state.claude_session_id
+
+第 2+ 条消息:
+  execute_node → 从 state 获取 claude_session_id
+  → query(prompt=..., options=ClaudeAgentOptions(resume=session_id))
+  → 复用已有 session，保持对话上下文
+
+页面刷新:
+  → 新 threadId → 新 LangGraph thread → 无 claude_session_id → 创建新 session
+```
+
+## AG-UI 事件类型
 
 | 事件 | 说明 | 数据 |
 |------|------|------|
@@ -113,7 +134,6 @@ AG-UI 协议定义了以下事件类型：
 | `TEXT_MESSAGE_START` | 文本消息开始 | messageId, role |
 | `TEXT_MESSAGE_CONTENT` | 文本消息内容 (流式) | delta |
 | `TEXT_MESSAGE_END` | 文本消息结束 | messageId |
-| `RAW` | 原始 LangGraph 事件 | event data |
 
 ## 思维过程广播
 
@@ -123,29 +143,32 @@ AG-UI 协议定义了以下事件类型：
 EventSource: GET /api/process-stream
 
 event: message
-data: {"id":"1","type":"text","content":"让我思考一下...","timestamp":1234567890}
+data: {"id":"1","type":"text","content":"[会话初始化] 工作目录: ...","timestamp":1234567890}
 
 event: message
-data: {"id":"2","type":"tool_use","content":"调用工具: Write","tool_name":"Write","tool_input":{...}}
+data: {"id":"2","type":"thinking","content":"让我分析新能源ETF...","timestamp":1234567891}
 
 event: message
-data: {"id":"3","type":"tool_result","content":"文件已创建","tool_result":"success"}
+data: {"id":"3","type":"tool_use","content":"调用工具: gf_etfrank","tool_name":"gf_etfrank","tool_input":{...}}
 
 event: message
-data: {"id":"4","type":"result","content":"任务完成","cost":0.01}
+data: {"id":"4","type":"tool_result","content":"ETF排行数据...","tool_result":"..."}
+
+event: message
+data: {"id":"5","type":"result","content":"任务完成 ($0.0234, 5.2s, 3 turns)","cost":0.0234}
 ```
 
 ### ProcessMessage 类型
 
 ```python
 class ProcessMessageType(str, Enum):
-    THINKING = "thinking"
-    TOOL_USE = "tool_use"
-    TOOL_RESULT = "tool_result"
-    TEXT = "text"
-    PERMISSION = "permission"
-    RESULT = "result"
-    ERROR = "error"
+    THINKING = "thinking"       # Claude 思考过程
+    TOOL_USE = "tool_use"       # 工具调用 (MCP 工具名 + 参数)
+    TOOL_RESULT = "tool_result" # 工具执行结果
+    TEXT = "text"               # 文本消息 (会话初始化、系统信息)
+    PERMISSION = "permission"   # 权限拒绝通知
+    RESULT = "result"           # 最终执行结果 (含 cost/duration)
+    ERROR = "error"             # 错误信息
 ```
 
 ## 权限处理流程
@@ -155,58 +178,41 @@ class ProcessMessageType(str, Enum):
 ```
 START → prepare → execute → permission_check → collect → END
                      ↑              │
-                     └──────────────┘  (用户点"允许并重试"时，以 bypassPermissions 重跑 execute)
+                     └──────────────┘  (用户点"允许并重试"→ bypassPermissions 重跑)
 ```
 
-### 权限交互时序图
+### 权限交互时序
 
 ```
 Claude CLI    execute_node    permission_check    Runtime    CopilotChat    User
     │              │                │                │           │           │
     │ ToolUseBlock │                │                │           │           │
-    │─────────────>│                │                │           │           │
+    │─────────────>│  SSE broadcast │                │           │           │
+    │              │───────────────────────────────────────────> ProcessPanel│
     │              │                │                │           │           │
-    │ CLI 拒绝     │                │                │           │           │
-    │ (no perm)    │                │                │           │           │
+    │ CLI 拒绝工具 │                │                │           │           │
     │─────────────>│                │                │           │           │
-    │              │  SSE broadcast │                │           │           │
-    │              │  "权限拒绝"  ──────────────────────────────>│ ProcessPanel│
     │              │                │                │           │           │
     │ ResultMessage│                │                │           │           │
     │ (denials:[]) │                │                │           │           │
-    │─────────────>│                │                │           │           │
-    │              │  denials 写入   │                │           │           │
-    │              │  state ────────>│                │           │           │
-    │              │                │                │           │           │
+    │─────────────>│  denials→state │                │           │           │
+    │              │───────────────>│                │           │           │
     │              │                │  interrupt()   │           │           │
-    │              │                │───────────────>│           │           │
-    │              │                │                │  AG-UI    │           │
+    │              │                │───────────────>│  AG-UI    │           │
     │              │                │                │──────────>│           │
-    │              │                │                │           │           │
     │              │                │                │  Permission Card     │
     │              │                │                │  ┌──────────────┐    │
     │              │                │                │  │ ⚠️ Write     │───>│
     │              │                │                │  │ [跳过][允许] │    │
     │              │                │                │  └──────────────┘    │
-    │              │                │                │           │           │
-    │              │                │                │           │  点击     │
-    │              │                │                │           │ "允许并   │
-    │              │                │                │           │  重试"    │
-    │              │                │                │           │<──────────│
-    │              │                │                │           │           │
-    │              │                │  resolve()     │           │           │
+    │              │                │                │           │  允许    │
+    │              │                │  resolve()     │           │<─────────│
     │              │                │<───────────────│<──────────│           │
-    │              │                │                │           │           │
-    │              │                │ retry=true     │           │           │
-    │              │                │───────────────>│           │           │
-    │              │                │                │           │           │
     │              │  重新执行       │                │           │           │
     │              │  (bypass mode) │                │           │           │
     │<─────────────│                │                │           │           │
-    │              │                │                │           │           │
     │ 执行成功     │                │                │           │           │
-    │─────────────>│                │                │           │           │
-    │              │────────────────────────────────────────────>│           │
+    │─────────────>│────────────────────────────────────────────>│           │
     │              │                │                │  最终回复  │           │
 ```
 
@@ -218,13 +224,37 @@ Claude CLI    execute_node    permission_check    Runtime    CopilotChat    User
 | 中风险 | git, npm, pip, mkdir, mv | 黄色标签，需确认 |
 | 低风险 | Read, Glob, Grep, search | 绿色标签，默认模式下自动批准 |
 
-### 权限卡片设计
+## 设置数据流
 
-在 CopilotChat 聊天流中渲染为交互式卡片 (`useLangGraphInterrupt`)：
+### 页面加载
 
-- 橙色渐变头部显示 "Claude 请求执行 N 个被拒绝的操作"
-- 每个被拒工具显示为子卡片：风险等级标签 + 工具名 + 参数预览
-- 底部两个按钮："跳过"（proceed to collect）/ "允许并重试"（re-execute with bypass）
+```
+Frontend mount
+  → GET /api/user-info      → 读取 backend/user_info.md (无缓存)
+  → GET /api/system-prompt   → 读取 backend/system_prompt.md (无缓存)
+  → 存入 state + defaultState
+  → POST /api/system-prompt  → 拼接后发送给后端内存
+  → POST /api/permission-mode → 默认 bypassPermissions
+```
+
+### 用户保存设置
+
+```
+用户点"保存"
+  → 拼接 userInfo + systemPrompt (用 "---" 分隔)
+  → POST /api/system-prompt  → 更新后端内存 (不写文件)
+  → POST /api/permission-mode → 更新后端内存
+  → 前端 state 更新 (仅缓存)
+  → 下次 Agent 执行时使用新提示词
+```
+
+### 页面刷新
+
+```
+刷新页面
+  → 重新从文件 API 读取 → 重置为文件内容
+  → 新 threadId → 新 LangGraph thread → 新 Claude session
+```
 
 ## 错误处理
 

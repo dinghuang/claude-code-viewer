@@ -16,14 +16,20 @@ ANTHROPIC_MODEL=claude-sonnet-4-5
 # Claude Code CLI 路径 (可选，默认使用系统 PATH 中的 claude)
 # CLAUDE_CODE_CLI_PATH=/usr/local/bin/claude
 
+# 工作目录 (Claude Code 执行的根目录)
+WORKING_DIRECTORY=/path/to/your/project
+
+# ============ MCP 服务器配置 (JSON 字符串) ============
+CLAUDE_CODE_MCP_SERVERS={"webresearch":{...},"qieman":{...},...}
+
 # ============ CopilotKit LLM 配置 (可选) ============
-# 如果不配置，CopilotKit 将使用默认设置
 COPILOTKIT_LLM_API_KEY=your_api_key_here
 COPILOTKIT_LLM_BASE_URL=https://api.anthropic.com
 COPILOTKIT_LLM_MODEL=claude-sonnet-4-5
 
-# ============ 系统提示词配置 ============
+# ============ 文件路径配置 ============
 SYSTEM_PROMPT_PATH=./system_prompt.md
+USER_INFO_PATH=./user_info.md
 
 # ============ 服务配置 ============
 HOST=0.0.0.0
@@ -46,7 +52,7 @@ RUNTIME_PORT=4000
 ### 前端配置 (frontend/.env)
 
 ```bash
-# Python 后端 API 地址 (用于 SSE 流和 Vite proxy)
+# Python 后端 API 地址 (用于 SSE 流和 REST API)
 VITE_API_URL=http://localhost:8000
 
 # CopilotKit Runtime 地址 (用于 CopilotKit 通信)
@@ -59,64 +65,47 @@ VITE_COPILOTKIT_RUNTIME_URL=http://localhost:4000
 frontend/.env                      runtime (env vars)           backend/.env
 ┌──────────────────────┐           ┌──────────────────┐         ┌──────────────────┐
 │ VITE_API_URL         │──────────────────────────────────────> │ Port 8000         │
-│ = localhost:8000     │ (SSE 流)  │                  │         │                   │
+│ = localhost:8000     │ (SSE+REST)│                  │         │                   │
 │                      │           │ AGENT_URL        │────────>│ POST / (AG-UI)    │
 │ VITE_COPILOTKIT_     │           │ = localhost:8000 │         │                   │
 │ RUNTIME_URL          │──────────>│                  │         │ ANTHROPIC_*       │
 │ = localhost:4000     │           │ RUNTIME_PORT     │         │ SYSTEM_PROMPT_*   │
-│                      │           │ = 4000           │         │                   │
+│                      │           │ = 4000           │         │ USER_INFO_PATH    │
 └──────────────────────┘           └──────────────────┘         └──────────────────┘
 ```
 
-## 系统提示词配置
+## 用户信息与系统提示词配置
 
-### 优先级
+### 文件存储
 
-系统提示词有两个来源，按优先级排序：
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| 用户画像 | `backend/user_info.md` | 客户基本信息、资产状况、投资偏好 |
+| 系统提示词 | `backend/system_prompt.md` | AI 投顾角色定义、投资研究技能、工具使用规则 |
 
-1. **前端编辑器** (最高优先级) — 左下角齿轮浮窗编辑后通过 `POST /api/system-prompt` 同步到后端内存
-2. **文件 fallback** — `backend/system_prompt.md`，仅当前端未设置时使用
+### 加载优先级
 
-### 前端编辑器
-
-页面左下角齿轮按钮打开系统提示词编辑浮窗，编辑后保存会调用：
-
-```bash
-# 更新提示词
-POST http://localhost:8000/api/system-prompt
-Content-Type: application/json
-{"prompt": "你的自定义提示词..."}
-
-# 查询当前提示词
-GET http://localhost:8000/api/system-prompt
-→ {"prompt": "当前生效的提示词..."}
+```
+前端 POST 覆盖 (内存中) > 文件 fallback (system_prompt.md)
 ```
 
-### 默认提示词 (内置在前端 + 文件 fallback)
+### 数据流
 
-```markdown
-# Claude Code Viewer 助手
+**页面加载时：**
+1. 前端 `GET /api/user-info` → 后端实时读取 `user_info.md`（无缓存）
+2. 前端 `GET /api/system-prompt` → 后端实时读取 `system_prompt.md`（无缓存）
+3. 前端拼接 `用户信息 + "---" + 系统提示词` → `POST /api/system-prompt`
+4. 后端存入内存，下次 Agent 执行时使用
 
-你是一个 Claude Code 助手，帮助用户执行代码任务。
-
-## 工作模式
-- 使用 Read 工具先了解项目结构
-- 使用 Glob 和 Grep 搜索相关文件
-- 使用 Edit 工具修改代码
-- 使用 Bash 工具执行命令
-
-## 权限策略
-- 读取操作：自动批准
-- 编辑操作：需要用户确认
-- 执行命令：高风险，需要用户明确确认
-```
+**用户编辑保存：**
+1. 前端设置面板拼接两个 textarea 内容
+2. `POST /api/system-prompt` 更新后端内存
+3. 前端仅做 state 缓存，不修改后端文件
+4. 刷新页面 → 重新从文件 API 读取 → 恢复为文件内容
 
 ### 配置模块 (backend/app/config.py)
 
 ```python
-from pydantic_settings import BaseSettings
-from pathlib import Path
-
 class Settings(BaseSettings):
     anthropic_api_key: str
     anthropic_auth_token: str
@@ -124,15 +113,25 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-4-5"
 
     system_prompt_path: str = "./system_prompt.md"
+    user_info_path: str = "./user_info.md"
 
     class Config:
         env_file = ".env"
 
     def get_system_prompt(self) -> Optional[str]:
+        """直接读文件，无缓存"""
         prompt_path = Path(self.system_prompt_path)
         if not prompt_path.exists():
             return None
         with open(prompt_path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+
+    def get_user_info(self) -> Optional[str]:
+        """直接读文件，无缓存"""
+        info_path = Path(self.user_info_path)
+        if not info_path.exists():
+            return None
+        with open(info_path, "r", encoding="utf-8") as f:
             return f.read().strip()
 ```
 
@@ -147,8 +146,6 @@ class Settings(BaseSettings):
 ## Python 版本要求
 
 CopilotKit Python SDK (copilotkit >= 0.1.40) 要求 Python >= 3.10, < 3.13。
-
-推荐使用 pyenv 管理 Python 版本：
 
 ```bash
 pyenv install 3.12

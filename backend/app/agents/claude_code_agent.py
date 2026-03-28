@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 class ClaudeCodeState(MessagesState):
     system_prompt_loaded: bool
+    claude_session_id: Optional[str]  # SDK session ID for session reuse
     claude_result: str
     claude_cost: float
     claude_duration_ms: int
@@ -235,7 +236,8 @@ async def execute_node(state: ClaudeCodeState):
     settings = get_settings()
 
     base_opts = build_claude_options()
-    system_prompt = get_effective_system_prompt() if not state.get("system_prompt_loaded") else None
+    system_prompt = get_effective_system_prompt()
+    existing_session_id = state.get("claude_session_id")
 
     # If retrying after user approved permissions, force bypassPermissions
     if state.get("retry_with_bypass"):
@@ -249,20 +251,40 @@ async def execute_node(state: ClaudeCodeState):
     else:
         perm_mode = get_permission_mode()
 
+    # Build options: resume existing session if available, otherwise create new
+    extra_opts = {}
+    if existing_session_id:
+        extra_opts["resume"] = existing_session_id
+        logger.info(f"Resuming session: {existing_session_id[:8]}...")
+    else:
+        if system_prompt:
+            extra_opts["system_prompt"] = system_prompt
+
     options = ClaudeAgentOptions(
         **base_opts,
         permission_mode=perm_mode,
-        **({"system_prompt": system_prompt} if system_prompt else {}),
+        **extra_opts,
     )
 
     result_text = ""
     cost = 0.0
     duration = 0
     denials = []
+    captured_session_id = existing_session_id
 
     try:
         async for msg in query(prompt=user_message, options=options):
             logger.info(f"SDK message: type={type(msg).__name__}")
+
+            # Capture session_id from init message for future reuse
+            if isinstance(msg, ClaudeSystemMessage):
+                subtype = getattr(msg, 'subtype', '')
+                if subtype == 'init':
+                    data = getattr(msg, 'data', {})
+                    if isinstance(data, dict) and data.get('session_id'):
+                        captured_session_id = data['session_id']
+                        logger.info(f"Captured session_id: {captured_session_id[:8]}...")
+
             for process_msg in convert_to_process_messages(msg):
                 await broadcast_to_subscribers(process_msg)
 
@@ -286,6 +308,7 @@ async def execute_node(state: ClaudeCodeState):
         "claude_result": result_text,
         "claude_cost": cost,
         "claude_duration_ms": duration,
+        "claude_session_id": captured_session_id,
         "system_prompt_loaded": True,
         "permission_denials": denials,
         "retry_with_bypass": False,

@@ -30,6 +30,7 @@ class Settings(BaseSettings):
 
     # ============ 系统提示词配置 ============
     system_prompt_path: str = "./system_prompt.md"
+    user_info_path: str = "./user_info.md"
 
     # ============ 服务配置 ============
     host: str = "0.0.0.0"
@@ -47,6 +48,15 @@ class Settings(BaseSettings):
             return None
 
         with open(prompt_path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+
+    def get_user_info(self) -> Optional[str]:
+        """加载用户信息"""
+        info_path = Path(self.user_info_path)
+        if not info_path.exists():
+            return None
+
+        with open(info_path, "r", encoding="utf-8") as f:
             return f.read().strip()
 
 

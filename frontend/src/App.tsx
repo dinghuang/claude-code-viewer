@@ -6,44 +6,76 @@ import { useLangGraphInterrupt } from "@copilotkit/react-core";
 import { PhoneFrame } from "./components/PhoneFrame";
 import { ProcessPanel } from "./components/ProcessPanel";
 import { PermissionCard } from "./components/PermissionDialog";
-import { SettingsPanel, DEFAULT_PROMPT } from "./components/SystemPromptPanel";
-import { useState, useEffect } from "react";
+import { SettingsPanel } from "./components/SystemPromptPanel";
+import { useState, useEffect, useRef } from "react";
 
 const RUNTIME_URL = (import.meta as any).env?.VITE_COPILOTKIT_RUNTIME_URL || "http://localhost:4000";
 const API_URL = (import.meta as any).env?.VITE_API_URL || "http://localhost:8000";
 
+// Stable thread ID — persists until page refresh, ensures session reuse
+const SESSION_THREAD_ID = `session-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
 export default function App() {
   const [showPanel, setShowPanel] = useState(false);
-  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_PROMPT);
+  const [userInfo, setUserInfo] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
   const [permissionMode, setPermissionMode] = useState("bypassPermissions");
+  // Defaults from backend files — used for "restore default" buttons
+  const [defaultUserInfo, setDefaultUserInfo] = useState("");
+  const [defaultSystemPrompt, setDefaultSystemPrompt] = useState("");
+  const initialized = useRef(false);
 
-  // Sync defaults to backend on mount
+  // Fetch user_info and system_prompt from backend files on mount
   useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
+
     Promise.all([
-      fetch(`${API_URL}/api/system-prompt`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: systemPrompt }),
-      }),
-      fetch(`${API_URL}/api/permission-mode`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: permissionMode }),
-      }),
-    ]).catch(() => {});
+      fetch(`${API_URL}/api/user-info`).then((r) => r.json()),
+      fetch(`${API_URL}/api/system-prompt`).then((r) => r.json()),
+    ])
+      .then(([infoRes, promptRes]) => {
+        const info = infoRes.content || "";
+        const prompt = promptRes.prompt || "";
+        setUserInfo(info);
+        setSystemPrompt(prompt);
+        setDefaultUserInfo(info);
+        setDefaultSystemPrompt(prompt);
+
+        // Send combined prompt + permission mode to backend
+        const combined = [info, prompt].filter(Boolean).join("\n\n---\n\n");
+        return Promise.all([
+          fetch(`${API_URL}/api/system-prompt`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt: combined }),
+          }),
+          fetch(`${API_URL}/api/permission-mode`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: permissionMode }),
+          }),
+        ]);
+      })
+      .catch((e) => console.error("Failed to fetch settings:", e));
   }, []);
 
   return (
     <CopilotKit
       runtimeUrl={`${RUNTIME_URL}/copilotkit`}
       agent="claude_code"
+      threadId={SESSION_THREAD_ID}
     >
       {/* Settings panel — bottom-left gear */}
       <SettingsPanel
+        userInfo={userInfo}
+        onUserInfoChange={setUserInfo}
         systemPrompt={systemPrompt}
         onSystemPromptChange={setSystemPrompt}
         permissionMode={permissionMode}
         onPermissionModeChange={setPermissionMode}
+        defaultUserInfo={defaultUserInfo}
+        defaultSystemPrompt={defaultSystemPrompt}
       />
 
       <div className="flex flex-col lg:flex-row h-screen bg-gray-100">

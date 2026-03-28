@@ -78,10 +78,17 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/api/user-info")
+async def get_user_info():
+    """Get user info from file (no cache)."""
+    info = settings.get_user_info()
+    return {"content": info or ""}
+
+
 @app.get("/api/system-prompt")
 async def get_system_prompt():
-    """Get current system prompt."""
-    prompt = get_effective_system_prompt()
+    """Get system prompt from file (no cache)."""
+    prompt = settings.get_system_prompt()
     return {"prompt": prompt or ""}
 
 
