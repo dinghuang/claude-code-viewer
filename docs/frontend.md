@@ -17,8 +17,9 @@ frontend/
 │   ├── index.css                   # Tailwind CSS 入口
 │   │
 │   ├── components/
-│   │   ├── PhoneFrame.tsx          # 手机框架容器
+│   │   ├── PhoneFrame.tsx          # 手机框架 (24h 实时时钟)
 │   │   ├── ProcessPanel.tsx        # 思维过程面板 (SSE)
+│   │   ├── SystemPromptPanel.tsx   # 系统提示词浮窗编辑器
 │   │   ├── CopilotChat.tsx         # CopilotKit 聊天组件
 │   │   ├── PermissionDialog.tsx    # 权限确认对话框
 │   │   ├── SelectionCard.tsx       # 选择器卡片
@@ -44,20 +45,43 @@ frontend/
 ### 1. 主布局 (App.tsx)
 
 ```tsx
-import { CopilotKit } from "@copilotkit/react-core";
-import { CopilotChat } from "@copilotkit/react-ui";
-import "@copilotkit/react-ui/styles.css";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-const RUNTIME_URL = import.meta.env.VITE_COPILOTKIT_RUNTIME_URL || "http://localhost:4000";
-
 export default function App() {
+  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_PROMPT);
+
+  // 启动时同步默认提示词到后端
+  useEffect(() => {
+    fetch(`${API_URL}/api/system-prompt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: systemPrompt }),
+    }).catch(() => {});
+  }, []);
+
   return (
-    <CopilotKit
-      runtimeUrl={`${RUNTIME_URL}/copilotkit`}  // 指向 Runtime (非 Backend)
-      agent="claude_code"
-    >
-      <div className="flex h-screen bg-gray-100">
+    <CopilotKit runtimeUrl={`${RUNTIME_URL}/copilotkit`} agent="claude_code">
+      <SystemPromptPanel value={systemPrompt} onChange={setSystemPrompt} />
+      <div className="flex h-screen">
+        {/* 左侧: shrink-0 手机固定宽度 */}
+        <div className="shrink-0 ..."><PhoneFrame><CopilotChatUI /></PhoneFrame></div>
+        {/* 右侧: flex-1 占满剩余 */}
+        <div className="flex-1 ..."><ProcessPanel /></div>
+      </div>
+    </CopilotKit>
+  );
+}
+```
+
+**布局特点：**
+- 左侧 `shrink-0` — 手机框架按自身宽度 (375px + padding)，不被压缩
+- 右侧 `flex-1` — ProcessPanel 自适应填满剩余空间
+- 移动端 Tab 切换两个面板
+
+### 2. 系统提示词编辑器 (SystemPromptPanel.tsx)
+
+左下角浮动齿轮按钮，点击打开 modal 编辑器：
+- 预置默认系统提示词
+- 修改后通过 `POST /api/system-prompt` 同步到后端
+- 支持"恢复默认"重置
         {/* 左侧：手机框架内的 CopilotKit Chat */}
         <div className="w-1/2 flex items-center justify-center">
           <PhoneFrame>

@@ -109,12 +109,12 @@ Single-Route        Protocol Bridge      AG-UI SSE
 ```
 
 ### Backend Structure (`backend/app/`)
-- `main.py` - FastAPI entry + AG-UI endpoint via `add_langgraph_fastapi_endpoint`
-- `config.py` - Pydantic settings with system prompt loading
+- `main.py` - FastAPI entry + AG-UI endpoint + system prompt REST API
+- `config.py` - Pydantic settings with system prompt file loading
 - `models.py` - ProcessMessage model for SSE stream
 - `api/process_stream.py` - SSE endpoint for thinking process
-- `agents/` - Agent definitions (reserved for Claude SDK integration)
-- `sdk/` - Claude SDK client wrapper (reserved)
+- `agents/claude_code_agent.py` - LangGraph Agent (prepare/execute/collect nodes), calls `claude_agent_sdk.query()`
+- `sdk/client.py` - `build_claude_options()` helper
 
 ### Runtime (`frontend/server/`)
 - `copilotkit-runtime.ts` - CopilotKit Runtime server (Node.js)
@@ -122,18 +122,20 @@ Single-Route        Protocol Bridge      AG-UI SSE
   - `LangGraphHttpAgent` → forwards to Python backend
 
 ### Frontend Structure (`frontend/src/`)
-- `App.tsx` - CopilotKit provider (`runtimeUrl` → port 4000) + dual-pane layout
-- `components/PhoneFrame.tsx` - Phone mockup container
+- `App.tsx` - CopilotKit provider + system prompt state + dual-pane layout (shrink-0 phone / flex-1 panel)
+- `components/PhoneFrame.tsx` - Phone mockup with 24h live clock
+- `components/SystemPromptPanel.tsx` - Floating gear button + modal prompt editor
 - `components/ProcessPanel.tsx` - Thinking process display (SSE → port 8000)
+- `components/PermissionDialog.tsx` - Permission card for CopilotKit Action
 - `hooks/useProcessStream.ts` - SSE subscription hook
-- `types/messages.ts` - ProcessMessage type definitions
 
 ### Communication Flow
 1. User input → CopilotKit Chat → Single-Route POST to Runtime (4000)
 2. Runtime → AG-UI POST to Backend (8000)
-3. Backend LangGraphAgent → executes StateGraph → returns SSE events
-4. Events flow back: Backend → Runtime → Frontend CopilotChat
-5. Thinking process → independent SSE channel → Frontend ProcessPanel
+3. Backend LangGraph: prepare → execute (`claude_agent_sdk.query()`) → collect
+4. Execute node streams SDK messages → SSE broadcast → Frontend ProcessPanel
+5. Collect node returns AIMessage → AG-UI → Runtime → CopilotChat
+6. System prompt: Frontend editor → `POST /api/system-prompt` → Backend memory
 
 ---
 
@@ -172,12 +174,15 @@ VITE_COPILOTKIT_RUNTIME_URL=http://localhost:4000     # For CopilotKit
 
 | Task | Key Files |
 |------|-----------|
-| Modify backend API / Agent | `backend/app/main.py` |
-| Modify AG-UI endpoint | `backend/app/main.py` (LangGraph graph definition) |
+| Modify backend Agent logic | `backend/app/agents/claude_code_agent.py` |
+| Modify backend API / endpoints | `backend/app/main.py` |
+| Modify system prompt handling | `backend/app/agents/claude_code_agent.py` (get_effective_system_prompt) |
 | Add configuration | `backend/app/config.py`, `backend/.env.example` |
 | Modify Runtime | `frontend/server/copilotkit-runtime.ts` |
 | Modify frontend layout | `frontend/src/App.tsx`, `frontend/src/components/PhoneFrame.tsx` |
+| Modify system prompt editor | `frontend/src/components/SystemPromptPanel.tsx` |
 | Modify process panel | `frontend/src/components/ProcessPanel.tsx`, `frontend/src/hooks/useProcessStream.ts` |
+| Modify permission UI | `frontend/src/components/PermissionDialog.tsx` |
 | Update types | `frontend/src/types/messages.ts`, `backend/app/models.py` |
 
 ---

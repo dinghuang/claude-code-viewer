@@ -2,12 +2,13 @@
 
 ## 概述
 
-后端基于 Python FastAPI 构建，使用 AG-UI 协议 (Agent-User Interaction) 与 CopilotKit Runtime 通信，通过 LangGraph 编排 Agent 逻辑。
+后端基于 Python FastAPI 构建，使用 AG-UI 协议与 CopilotKit Runtime 通信，通过 LangGraph 编排 Agent 逻辑，调用真实的 Claude Code CLI。
 
 **核心技术栈：**
 - Python 3.12 (CopilotKit SDK 要求 <3.13)
 - FastAPI + ag-ui-langgraph
-- LangGraph StateGraph
+- LangGraph StateGraph (prepare → execute → collect)
+- claude-agent-sdk 0.1.51 (调用 Claude Code CLI)
 - copilotkit 0.1.83
 
 ## 模块结构
@@ -19,12 +20,12 @@ backend/
 │   ├── main.py                 # FastAPI 入口 + AG-UI 端点注册
 │   ├── config.py               # Pydantic Settings 配置管理
 │   ├── models.py               # ProcessMessage 数据模型
-│   ├── agents/                 # Agent 定义 (预留扩展)
+│   ├── agents/                 # LangGraph Agent
 │   │   ├── __init__.py
-│   │   └── claude_code_agent.py
-│   ├── sdk/                    # Claude SDK 封装 (预留扩展)
+│   │   └── claude_code_agent.py  # ClaudeCodeState + 3 nodes + build_graph()
+│   ├── sdk/                    # Claude SDK 封装
 │   │   ├── __init__.py
-│   │   └── client.py
+│   │   └── client.py             # build_claude_options() helper
 │   └── api/
 │       ├── __init__.py
 │       └── process_stream.py   # SSE 思维过程流
@@ -85,6 +86,8 @@ add_langgraph_fastapi_endpoint(app, agent, path="/")
 | `POST /` | AG-UI | Agent 执行端点 (由 Runtime 调用) |
 | `GET /health` | REST | 健康检查 |
 | `GET /api/process-stream` | SSE | 思维过程实时流 |
+| `GET /api/system-prompt` | REST | 获取当前系统提示词 |
+| `POST /api/system-prompt` | REST | 更新系统提示词 (前端浮窗调用) |
 
 ### 2. AG-UI 端点 (`add_langgraph_fastapi_endpoint`)
 
@@ -106,22 +109,32 @@ add_langgraph_fastapi_endpoint(app, agent, path="/")
 
 ### 3. LangGraph Agent
 
-Agent 逻辑以 LangGraph `StateGraph` 定义。当前使用简单的 echo 节点，后续将接入 Claude SDK。
+Agent 逻辑以 LangGraph `StateGraph` 定义，三个异步节点：
+
+- **prepare_node** — 加载系统提示词（前端覆盖 > 文件 fallback），广播到 SSE
+- **execute_node** — 调用 `claude_agent_sdk.query()` 与真实 Claude Code CLI 交互，流式广播所有消息到 ProcessPanel
+- **collect_node** — 将 Claude 最终结果包装为 AIMessage 返回 CopilotChat
 
 ```python
-from langgraph.graph import StateGraph, MessagesState, START, END
+# execute_node 核心逻辑
+async for msg in query(prompt=user_message, options=options):
+    process_msg = convert_to_process_message(msg)  # SDK msg → ProcessMessage
+    if process_msg:
+        await broadcast_to_subscribers(process_msg)  # → SSE → ProcessPanel
+    if isinstance(msg, ResultMessage):
+        result_text = msg.result  # 最终结果 → collect_node → AIMessage
+```
 
-def chat_node(state: MessagesState):
-    """聊天处理节点 - 后续接入 Claude SDK"""
-    user_message = state.get("messages", [])[-1].content
-    response = f"收到消息: {user_message}"
-    return {"messages": [AIMessage(content=response)]}
+### 系统提示词 API
 
-graph = StateGraph(MessagesState)
-graph.add_node("chat", chat_node)
-graph.add_edge(START, "chat")
-graph.add_edge("chat", END)
-compiled_graph = graph.compile(checkpointer=MemorySaver())
+后端维护一个内存中的系统提示词存储，支持前端实时编辑：
+
+```python
+# 优先级: 前端覆盖 > 文件 fallback
+def get_effective_system_prompt() -> Optional[str]:
+    if _system_prompt_override is not None:
+        return _system_prompt_override
+    return get_settings().get_system_prompt()
 ```
 
 **AG-UI 事件流输出示例：**

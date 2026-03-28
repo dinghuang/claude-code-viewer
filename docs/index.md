@@ -77,14 +77,22 @@ Single-Route        协议转换              AG-UI SSE
 - React 18 + Vite + Tailwind CSS
 - CopilotKit v1.54.1 (`@copilotkit/react-core`, `@copilotkit/react-ui`)
 
-### Runtime 中��层 (Port 4000)
+### Runtime 中间层 (Port 4000)
 - Node.js + `@copilotkit/runtime` v1.54.1
 - 协议转换: Single-Route ↔ AG-UI
 
 ### 后端 (Port 8000)
 - Python 3.12 + FastAPI
-- LangGraph 1.0+ (Agent 编排)
+- LangGraph 1.0+ (Agent 编排: prepare → execute → collect)
 - ag-ui-langgraph 0.0.28 (AG-UI 端点)
+- claude-agent-sdk 0.1.51 (调用 Claude Code CLI)
 - copilotkit 0.1.83
-- Claude Agent SDK
 - SSE (思维过程广播)
+
+## 主要功能
+
+- **Claude Code CLI 集成**: 后端通过 `claude_agent_sdk.query()` 调用真实 Claude Code CLI
+- **实时思维过程**: SSE 广播 Claude 的思考、工具调用、结果到右侧面板
+- **系统提示词编辑器**: 左下角浮窗可在线编辑系统提示词，通过 REST API 同步后端
+- **24 小时实时时钟**: 手机框架状态栏显示实时时间
+- **响应式布局**: 左侧手机固定宽度，右侧面板自适应填满

@@ -1,161 +1,160 @@
 # Claude Code Viewer
 
-一个用于可视化 Claude Code 执行过程的 Web 应用，集成 CopilotKit 提供美化的交互界面。
+一个用于可视化 Claude Code 执行过程的 Web 应用。采用三服务架构，通过 CopilotKit 提供美化的聊天交互界面，右侧实时展示 Claude Code 的思维过程。
 
 ## 功能特点
 
-- 🖥️ **左侧手机框架**: 显示 CopilotKit 美化的交互界面
-- 📋 **右侧思维面板**: 显示 Claude Code 完整思维过程
-- 🔄 **双向交互**: 用户通过 CopilotKit 界面回复权限请求
-- 📝 **系统提示词**: 首次对话前自动加载可配置的系统提示词
-- 🎨 **丰富 UI**: 权限卡片、下拉选择器、进度指示器、结果摘要
+- **左侧手机框架**: CopilotKit 美化的聊天界面，24 小时实时时钟
+- **右侧思维面板**: SSE 实时展示 Claude Code 完整执行过程（思考、工具调用、结果）
+- **系统提示词编辑**: 左下角浮窗可实时编辑系统提示词，自动同步到后端
+- **真实 Claude Code CLI**: 后端通过 `claude-agent-sdk` 调用真实的 Claude Code CLI
+- **响应式布局**: 桌面端双栏（手机固定宽度 + 右侧自适应），移动端 Tab 切换
+
+## 架构
+
+```
+Frontend (3000)  →  Runtime (4000)  →  Backend (8000)
+React+CopilotKit    Node.js Middleware   Python+LangGraph
+Single-Route        协议转换              AG-UI SSE
+                                         ↓
+                                    Claude Code CLI
+```
+
+三服务架构：
+
+| 服务 | 技术栈 | 端口 | 职责 |
+|------|--------|------|------|
+| **Frontend** | React 18 + Vite + Tailwind CSS + CopilotKit 1.54.1 | 3000 | 聊天 UI、思维过程展示、系统提示词编辑 |
+| **Runtime** | Node.js + @copilotkit/runtime 1.54.1 | 4000 | Single-Route ↔ AG-UI 协议转换 |
+| **Backend** | Python 3.12 + FastAPI + LangGraph + claude-agent-sdk | 8000 | LangGraph Agent 编排、Claude Code CLI 调用、SSE 广播 |
+
+### 后端 LangGraph 流程
+
+```
+用户消息 → prepare (加载系统提示词) → execute (调用 Claude Code CLI) → collect (返回 AI 回复)
+                                          │
+                                    ├── SSE 广播到 ProcessPanel
+                                    └── 最终结果 → CopilotChat
+```
 
 ## 技术栈
 
-### 前端
-- React 18
-- Vite
-- Tailwind CSS
-- CopilotKit (React)
+### 前端 (Port 3000)
+- React 18 + Vite + Tailwind CSS
+- CopilotKit v1.54.1 (`@copilotkit/react-core`, `@copilotkit/react-ui`)
 
-### 后端
-- Python FastAPI
-- Claude Agent SDK (claude-agent-sdk-python)
-- CopilotKit SDK (copilotkit)
-- SSE (Server-Sent Events)
+### Runtime 中间层 (Port 4000)
+- Node.js + `@copilotkit/runtime` v1.54.1
+- `LangGraphHttpAgent` 转发到 Python 后端
+
+### 后端 (Port 8000)
+- Python 3.12 + FastAPI
+- LangGraph 1.0+ (`ag-ui-langgraph` 0.0.28)
+- `claude-agent-sdk` 0.1.51 (调用 Claude Code CLI)
+- `copilotkit` 0.1.83
+- SSE (`sse-starlette`)
 
 ## 项目结构
 
 ```
 claude-code-viewer/
-├── frontend/                 # React + Vite + Tailwind
+├── frontend/                         # React 前端 (Port 3000)
+│   ├── server/
+│   │   └── copilotkit-runtime.ts     # CopilotKit Runtime (Port 4000)
 │   ├── src/
+│   │   ├── App.tsx                   # CopilotKit Provider + 布局
 │   │   ├── components/
-│   │   │   ├── PhoneFrame.tsx        # 手机框架
-│   │   │   ├── ProcessPanel.tsx      # 思维过程面板
+│   │   │   ├── PhoneFrame.tsx        # 手机框架 (24h 时钟)
+│   │   │   ├── ProcessPanel.tsx      # 思维过程面板 (SSE)
+│   │   │   ├── SystemPromptPanel.tsx # 系统提示词浮窗编辑器
+│   │   │   ├── PermissionDialog.tsx  # 权限确认卡片
 │   │   │   └── ...
 │   │   ├── hooks/
-│   │   │   └── useProcessStream.ts   # SSE 连接
-│   │   ├── types/
-│   │   │   └── messages.ts           # 类型定义
-│   │   ├── App.tsx
-│   │   └── main.tsx
+│   │   │   └── useProcessStream.ts   # SSE 连接 Hook
+│   │   └── types/
+│   │       └── messages.ts
 │   ├── package.json
 │   └── vite.config.ts
-├── backend/                  # Python FastAPI
+│
+├── backend/                          # Python 后端 (Port 8000)
 │   ├── app/
-│   │   ├── main.py           # FastAPI 入口 + CopilotKit 集成
-│   │   ├── config.py         # 配置管理
-│   │   ├── models.py         # 数据模型
-│   │   ├── agents/           # CopilotKit Agents
-│   │   ├── sdk/              # Claude SDK 封装
-│   │   └── api/              # API 端点
-│   ├── system_prompt.md      # 系统提示词配置
-│   └── requirements.txt
-└── docs/                     # 设计文档
+│   │   ├── main.py                   # FastAPI 入口 + AG-UI + REST API
+│   │   ├── config.py                 # Pydantic Settings 配置
+│   │   ├── models.py                 # ProcessMessage 模型
+│   │   ├── agents/
+│   │   │   └── claude_code_agent.py  # LangGraph Agent (prepare/execute/collect)
+│   │   ├── sdk/
+│   │   │   └── client.py             # Claude SDK options builder
+│   │   └── api/
+│   │       └── process_stream.py     # SSE 思维过程端点
+│   ├── system_prompt.md              # 默认系统提示词 (fallback)
+│   ├── requirements.txt
+│   └── venv/                         # Python 3.12 虚拟环境
+│
+└── docs/                             # 设计文档
     ├── index.md
     ├── architecture.md
+    ├── runtime.md
+    ├── backend.md
+    ├── frontend.md
+    ├── data-flow.md
     ├── configuration.md
-    └── ...
+    └── copilotkit-integration.md
 ```
 
 ## 快速开始
 
 ### 环境要求
 
-- **Python**: 3.10 - 3.12 (不支持 3.13+)
+- **Python**: 3.10 - 3.12 (不支持 3.13+，CopilotKit SDK 限制)
 - **Node.js**: 18+
-- **Claude Code CLI**: 已安装并配置好
+- **Claude Code CLI**: 已安装并配置
 
-### 第一步：克隆项目
-
-```bash
-git clone <repository-url>
-cd claude-code-viewer
-```
-
-### 第二步：启动后端
+### 第一步：启动后端
 
 ```bash
-# 1. 进入后端目录
 cd backend
 
-# 2. 创建虚拟环境
-python -m venv venv
-
-# 3. 激活虚拟环境
-# Linux/Mac:
+# 创建 Python 3.12 虚拟环境 (推荐用 pyenv)
+python3.12 -m venv venv
 source venv/bin/activate
-# Windows:
-# venv\Scripts\activate
 
-# 4. 安装依赖
 pip install -r requirements.txt
-
-# 5. 复制环境变量模板
 cp .env.example .env
+# 编辑 .env 配置 API 密钥
 
-# 6. 编辑 .env 文件，配置 API 密钥
-# 必须配置的变量：
-# - ANTHROPIC_API_KEY
-# - ANTHROPIC_AUTH_TOKEN
-# - ANTHROPIC_BASE_URL
-# - ANTHROPIC_MODEL
-
-# 7. 启动后端服务
 uvicorn app.main:app --reload --port 8000
 ```
 
-**验证后端启动成功：**
+验证：`curl http://localhost:8000/health` → `{"status":"ok"}`
 
-看到以下输出表示启动成功：
-```
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [xxxxx] using WatchFiles
-🚀 Claude Code Viewer 启动中...
-   工作目录: .
-   模型: claude-sonnet-4-5
-   系统提示词已加载 (xxx 字符)
-   CopilotKit 端点已注册: /copilotkit
-```
-
-访问 http://localhost:8000/health 应返回 `{"status": "ok"}`
-
-### 第三步：启动前端
-
-**新开一个终端窗口：**
+### 第二步：启动 Runtime + 前端
 
 ```bash
-# 1. 进入前端目录
 cd frontend
 
-# 2. 安装依赖
 npm install
-
-# 3. 复制环境变量模板
 cp .env.example .env
 
-# 4. 启动开发服务器
-npm run dev
+# 方式一：分别启动
+npm run dev          # 前端 (Port 3000)
+npm run dev:runtime  # Runtime (Port 4000)
+
+# 方式二：同时启动
+npm run dev:all
 ```
 
-**验证前端启动成功：**
+### 第三步：访问
 
-看到以下输出表示启动成功：
-```
-  VITE v5.x.x  ready in xxx ms
+打开 http://localhost:3000
 
-  ➜  Local:   http://localhost:3000/
-  ➜  Network: use --host to expose
-```
-
-### 第四步：访问应用
-
-打开浏览器访问 http://localhost:3000
+- 左侧手机框架：输入消息与 Claude Code 对话
+- 右侧面板：实时查看 Claude Code 思维过程
+- 左下角齿轮：编辑系统提示词
 
 ## 配置
 
-### 后端环境变量 (.env)
+### 后端环境变量 (backend/.env)
 
 ```bash
 # ============ Claude Code SDK 配置 (必填) ============
@@ -164,16 +163,7 @@ ANTHROPIC_AUTH_TOKEN=your_auth_token_here
 ANTHROPIC_BASE_URL=https://api.anthropic.com
 ANTHROPIC_MODEL=claude-sonnet-4-5
 
-# Claude Code CLI 路径 (可选，默认使用系统 PATH 中的 claude)
-# CLAUDE_CODE_CLI_PATH=/usr/local/bin/claude
-
-# ============ CopilotKit LLM 配置 (可选) ============
-# 如果不配置，CopilotKit 将使用默认设置
-COPILOTKIT_LLM_API_KEY=your_api_key_here
-COPILOTKIT_LLM_BASE_URL=https://api.anthropic.com
-COPILOTKIT_LLM_MODEL=claude-sonnet-4-5
-
-# ============ 系统提示词配置 ============
+# ============ 系统提示词 (可选，前端编辑器优先) ============
 SYSTEM_PROMPT_PATH=./system_prompt.md
 
 # ============ 服务配置 ============
@@ -182,144 +172,68 @@ PORT=8000
 DEBUG=true
 ```
 
-### 前端环境变量 (.env)
+### Runtime 环境变量
 
 ```bash
-# 后端 API 地址
-VITE_API_URL=http://localhost:8000
+AGENT_URL=http://localhost:8000     # Python 后端地址
+RUNTIME_PORT=4000                   # Runtime 端口
 ```
+
+### 前端环境变量 (frontend/.env)
+
+```bash
+VITE_API_URL=http://localhost:8000                    # SSE 流 + 系统提示词 API
+VITE_COPILOTKIT_RUNTIME_URL=http://localhost:4000     # CopilotKit Runtime
+```
+
+## API 端点
+
+### Backend (Port 8000)
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `POST /` | AG-UI | LangGraph Agent 执行 (由 Runtime 调用) |
+| `GET /health` | REST | 健康检查 |
+| `GET /api/process-stream` | SSE | 思维过程实时流 |
+| `GET /api/system-prompt` | REST | 获取当前系统提示词 |
+| `POST /api/system-prompt` | REST | 更新系统提示词 |
+
+### Runtime (Port 4000)
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `POST /copilotkit` | Single-Route | CopilotKit 统一端点 (method: info/agent/run/agent/stop) |
+| `GET /health` | REST | 健康检查 |
 
 ## 常见问题
 
-### 后端启动失败
+### Python 版本不兼容
 
-**问题: `ModuleNotFoundError: No module named 'langgraph'`**
+CopilotKit Python SDK 要求 Python 3.10-3.12，不支持 3.13+：
 
-解决: 确保安装了所有依赖
 ```bash
-pip install -r requirements.txt
-```
-
-**问题: Python 版本不兼容**
-
-解决: CopilotKit 要求 Python 3.10-3.12，不支持 3.13+
-```bash
-# 使用 pyenv 切换 Python 版本
 pyenv install 3.12
-pyenv local 3.12
+cd backend && pyenv local 3.12
+python -m venv venv
 ```
 
-**问题: `ValidationError` 配置错误**
+### 前端连接失败
 
-解决: 确保 `.env` 文件中配置了所有必填变量
-- `ANTHROPIC_API_KEY`
-- `ANTHROPIC_AUTH_TOKEN`
-- `ANTHROPIC_BASE_URL`
+1. 确认三个服务都已启动
+2. 检查 `frontend/.env` 中的 URL 配置
+3. Runtime 必须启动 (`npm run dev:runtime`)
 
-### 前端启动失败
+### Claude Code CLI 未响应
 
-**问题: `npm install` 失败**
+确保 Claude Code CLI 已安装且 `.env` 中的 API 密钥正确：
 
-解决: 清除缓存后重试
 ```bash
-rm -rf node_modules package-lock.json
-npm install
-```
-
-**问题: 页面空白或连接失败**
-
-解决:
-1. 确认后端已启动 (访问 http://localhost:8000/health)
-2. 检查前端 `.env` 中的 `VITE_API_URL` 是否正确
-3. 检查浏览器控制台是否有跨域错误
-
-### Claude Code CLI 相关
-
-**问题: Claude Code CLI 未找到**
-
-解决: 确保 Claude Code CLI 已安装并在 PATH 中
-```bash
-# 检查是否安装
 which claude
-
-# 如果未安装，按照官方文档安装
-```
-
-## 开发命令
-
-### 后端
-
-```bash
-# 启动开发服务器 (热重载)
-uvicorn app.main:app --reload --port 8000
-
-# 启动生产服务器
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# 查看 API 文档
-# 访问 http://localhost:8000/docs
-```
-
-### 前端
-
-```bash
-# 启动开发服务器
-npm run dev
-
-# 构建生产版本
-npm run build
-
-# 预览生产版本
-npm run preview
-
-# 代码检查
-npm run lint
 ```
 
 ## 文档
 
 详细设计文档请参阅 [docs/index.md](docs/index.md)
-
-## 架构
-
-```
-┌────────────────────────────────────────────────────────────────┐
-│                         用户界面层                              │
-│  ┌─────────────────────┐   ┌───────────────────────────────┐  │
-│  │   PhoneFrame        │   │   ProcessPanel                │  │
-│  │   (CopilotKit UI)   │   │   (思维过程 SSE 流)            │  │
-│  └─────────────────────┘   └───────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────┐
-│                       后端服务层                                │
-│  ┌─────────────────────────────────────────────────────────┐  │
-│  │  FastAPI + CopilotKitRemoteEndpoint                     │  │
-│  │  └── ClaudeCodeAgent                                     │  │
-│  │       ├── 系统提示词预加载                                │  │
-│  │       ├── 消息转发到 Claude SDK                          │  │
-│  │       └── 思维过程广播到 SSE                              │  │
-│  └─────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────┐
-│                       Claude SDK 层                            │
-│  ┌─────────────────────────────────────────────────────────┐  │
-│  │  ClaudeSDKClient (claude-agent-sdk-python)              │  │
-│  │  - 启动 Claude Code CLI                                  │  │
-│  │  - 发送用户消息                                          │  │
-│  │  - 接收 Claude 响应流                                    │  │
-│  │  - 权限请求回调                                          │  │
-│  └─────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────┐
-│                    Claude Code CLI (本地)                      │
-└────────────────────────────────────────────────────────────────┘
-```
 
 ## License
 

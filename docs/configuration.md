@@ -70,11 +70,29 @@ frontend/.env                      runtime (env vars)           backend/.env
 
 ## 系统提示词配置
 
-### 配置说明
+### 优先级
 
-用户首次对话时，系统会预先加载系统提示词文件。
+系统提示词有两个来源，按优先级排序：
 
-### 提示词文件 (backend/system_prompt.md)
+1. **前端编辑器** (最高优先级) — 左下角齿轮浮窗编辑后通过 `POST /api/system-prompt` 同步到后端内存
+2. **文件 fallback** — `backend/system_prompt.md`，仅当前端未设置时使用
+
+### 前端编辑器
+
+页面左下角齿轮按钮打开系统提示词编辑浮窗，编辑后保存会调用：
+
+```bash
+# 更新提示词
+POST http://localhost:8000/api/system-prompt
+Content-Type: application/json
+{"prompt": "你的自定义提示词..."}
+
+# 查询当前提示词
+GET http://localhost:8000/api/system-prompt
+→ {"prompt": "当前生效的提示词..."}
+```
+
+### 默认提示词 (内置在前端 + 文件 fallback)
 
 ```markdown
 # Claude Code Viewer 助手
